@@ -1,0 +1,10 @@
+node_modules/
+
+# Credentials. CONFLUENCE_API_TOKEN is a personal token carrying your own
+# rights — it must never reach the repository.
+.env
+.env.*
+!.env.example
+
+.DS_Store
+*.log

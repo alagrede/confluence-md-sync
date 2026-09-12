@@ -1,0 +1,46 @@
+{
+    "name": "confluence-md-sync",
+    "version": "0.1.0",
+    "description": "Mirror Confluence pages as markdown, browse them locally, and publish your edits back.",
+    "keywords": [
+        "confluence",
+        "markdown",
+        "docs-as-code",
+        "atlassian",
+        "documentation",
+        "sync"
+    ],
+    "license": "MIT",
+    "author": "alagrede (https://github.com/alagrede)",
+    "repository": {
+        "type": "git",
+        "url": "git+https://github.com/alagrede/confluence-md-sync.git"
+    },
+    "bugs": {
+        "url": "https://github.com/alagrede/confluence-md-sync/issues"
+    },
+    "homepage": "https://github.com/alagrede/confluence-md-sync#readme",
+    "type": "module",
+    "bin": {
+        "confluence-md-sync": "bin/cli.mjs"
+    },
+    "exports": {
+        ".": "./src/index.mjs"
+    },
+    "files": [
+        "bin",
+        "src",
+        "examples",
+        "README.md",
+        "LICENSE"
+    ],
+    "engines": {
+        "node": ">=18"
+    },
+    "scripts": {
+        "test": "node --test test/*.test.mjs",
+        "docs:pull": "node bin/cli.mjs pull",
+        "docs:push": "node bin/cli.mjs push",
+        "docs:serve": "node bin/cli.mjs serve"
+    }
+}
