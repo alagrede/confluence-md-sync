@@ -21,7 +21,7 @@ and the global `fetch`. Nothing to audit, nothing to keep up to date.
 From nothing to reading your Confluence docs in git:
 
 ```sh
-npm install --save-dev alagrede/confluence-md-sync
+npm install --save-dev @alagrede/confluence-md-sync
 npx confluence-md-sync init          # writes confluence-md-sync.config.mjs
 ```
 
@@ -43,14 +43,19 @@ from now on every Confluence edit arrives as a reviewable `git diff`.
 ## Install
 
 ```sh
-npm install --save-dev alagrede/confluence-md-sync
-# or:  yarn add -D alagrede/confluence-md-sync
-# or:  npm install --save-dev git+https://github.com/alagrede/confluence-md-sync.git
+npm install --save-dev @alagrede/confluence-md-sync
+# or:  yarn add -D @alagrede/confluence-md-sync
 ```
 
-> **Install from GitHub, not from npm.** An unrelated project already publishes
-> the name `confluence-md-sync` to the npm registry, so
-> `npm install confluence-md-sync` gets *that* tool, not this one.
+> **Mind the scope.** The unscoped `confluence-md-sync` on npm is an unrelated
+> project by another author. This one is `@alagrede/confluence-md-sync`. The
+> command it installs is still called `confluence-md-sync`.
+
+Straight from git works too, if you would rather track the default branch:
+
+```sh
+npm install --save-dev git+https://github.com/alagrede/confluence-md-sync.git
+```
 
 To hack on it instead of consuming it:
 
@@ -387,7 +392,7 @@ without the CLI — for a CI check that a page round-trips, a one-off migration,
 or a bot that posts markdown to Confluence:
 
 ```js
-import { storageToMarkdown, markdownToStorage } from 'confluence-md-sync';
+import { storageToMarkdown, markdownToStorage } from '@alagrede/confluence-md-sync';
 
 const { markdown, imageRefs } = storageToMarkdown(page.body.storage.value);
 const storage = markdownToStorage('## Scope\n\nA **bold** claim.');
