@@ -4,6 +4,8 @@
 // contain — headings, bold, italics, lists, tables, links, images, and the
 // code and panel macros. Anything else is reduced to its text content.
 
+import { repairEmphasis } from '../markdown/emphasis.mjs';
+
 const NAMED_ENTITIES = {
     lt: '<',
     gt: '>',
@@ -90,6 +92,23 @@ function decodeEntities(text) {
 
 function stripTags(text) {
     return decodeEntities(text.replace(/<[^>]+>/g, '')).trim();
+}
+
+/**
+ * `<strong>Text </strong>more` → `**Text** more`.
+ *
+ * Trimming the inner text, as stripTags does, would glue the two words
+ * together; keeping the space inside the markers would stop the closing `**`
+ * from closing anything. The space belongs outside them, which loses nothing
+ * and is the shape a reader renders.
+ */
+function emphasise(marker, inner) {
+    const text = decodeEntities(inner.replace(/<[^>]+>/g, ''));
+    const core = text.trim();
+    if (!core) return text;
+    const lead = text.slice(0, text.length - text.trimStart().length);
+    const trail = text.slice(text.trimEnd().length);
+    return `${lead}${marker}${core}${marker}${trail}`;
 }
 
 /**
@@ -214,8 +233,8 @@ export function storageToMarkdown(storage) {
         );
     }
 
-    text = text.replace(/<(strong|b)[^>]*>([\s\S]*?)<\/\1>/g, (_, __, inner) => `**${stripTags(inner)}**`);
-    text = text.replace(/<(em|i)[^>]*>([\s\S]*?)<\/\1>/g, (_, __, inner) => `*${stripTags(inner)}*`);
+    text = text.replace(/<(strong|b)[^>]*>([\s\S]*?)<\/\1>/g, (_, __, inner) => emphasise('**', inner));
+    text = text.replace(/<(em|i)[^>]*>([\s\S]*?)<\/\1>/g, (_, __, inner) => emphasise('*', inner));
     text = text.replace(/<code[^>]*>([\s\S]*?)<\/code>/g, (_, inner) => `\`${stripTags(inner)}\``);
     text = text.replace(
         /<a[^>]*href="([^"]*)"[^>]*>([\s\S]*?)<\/a>/g,
@@ -228,6 +247,9 @@ export function storageToMarkdown(storage) {
     text = text.replace(/<hr\s*\/?>/g, '\n---\n');
     text = text.replace(/<[^>]+>/g, '');
     text = decodeEntities(text);
+    // Last, because it reads the characters around each delimiter and those are
+    // only final once the tags are gone and the entities are decoded.
+    text = repairEmphasis(text);
     text = text.replace(/\n{3,}/g, '\n\n').trim();
 
     return { markdown: text, imageRefs };

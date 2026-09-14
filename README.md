@@ -380,6 +380,14 @@ The mirror's `README.md` is not a Confluence page: `push` ignores it.
   So: editing the prose *around* a panel is fine, but a page whose panels you
   care about is better corrected in Confluence directly. Guard 3 is what stops
   this happening to pages you never touched.
+- **A space may appear next to bold or italics.** Confluence has no delimiters,
+  so `<strong>Document applicable:</strong>Ce document` is an ordinary page —
+  but `**Document applicable:**Ce document` is *plain text* to every markdown
+  reader: a closing `**` preceded by punctuation and followed by a letter
+  cannot close anything (CommonMark's flanking rules). The pull inserts the one
+  space that makes it render, and moves a space that sat inside the markers
+  outside them. Prose asterisks are left alone — `3 * 4 * 5` never becomes an
+  italic.
 - **No automatic deletion, in either direction.** A page deleted in Confluence
   leaves its file behind; a file deleted here does not delete the page.
 - **Confluence Cloud REST v1.** Not tested against Confluence Server /

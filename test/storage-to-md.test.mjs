@@ -16,6 +16,20 @@ test('inline marks', () => {
     assert.equal(md('<p>A <strong>b</strong> <em>c</em> <code>d</code></p>'), 'A **b** *c* `d`');
 });
 
+test('bold glued to the text after it still renders', () => {
+    // Confluence has no delimiters, so `<strong>Label:</strong>Text` is an
+    // ordinary page — and `**Label:**Text` is plain text to every reader.
+    assert.equal(
+        md('<p><strong>Document applicable:</strong>Ce document</p>'),
+        '**Document applicable:** Ce document'
+    );
+    assert.equal(md('<p><strong>Etat des lieux :</strong>Version 1</p>'), '**Etat des lieux :** Version 1');
+});
+
+test('a space inside a bold run moves outside it instead of being trimmed away', () => {
+    assert.equal(md('<p><strong>Texte </strong>suite</p>'), '**Texte** suite');
+});
+
 test('links keep their href', () => {
     assert.equal(md('<p><a href="https://example.com/x">label</a></p>'), '[label](https://example.com/x)');
 });
