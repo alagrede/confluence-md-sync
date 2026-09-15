@@ -1,6 +1,6 @@
 {
     "name": "@alagrede/confluence-md-sync",
-    "version": "0.1.4",
+    "version": "0.1.5",
     "description": "Mirror Confluence pages as markdown, browse them locally, and publish your edits back.",
     "keywords": [
         "confluence",
