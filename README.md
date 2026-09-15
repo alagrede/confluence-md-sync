@@ -203,9 +203,12 @@ therefore work as they are, with no rewriting.
 
 The server binds `127.0.0.1` only, and serves three kinds of thing and nothing
 else: markdown rendered to HTML, files whose extension is on a fixed asset
-allowlist (images, PDF, Office documents, CSS, JSON, txt, csv), and nothing at all otherwise —
-an unknown extension is a 404 rather than an `application/octet-stream`
-download. Paths escaping the served root are refused, as is any path with a
+allowlist (images, PDF, Office documents, CSS, JSON, txt, csv), and attachments
+— any other file inside an `assets/` folder, where `pull` puts them, downloads
+rather than displays. Anywhere else an unknown extension is a 404 rather than
+an `application/octet-stream` download, and an attachment is refused to a
+request addressed by a public domain name (DNS rebinding). An SVG is served in
+a sandbox, so its scripts never run. Paths escaping the served root are refused, as is any path with a
 dotted segment, so `.env` and `.git/` stay unreachable even when the root is
 wider than the mirror (see `serve.root` in the example config).
 

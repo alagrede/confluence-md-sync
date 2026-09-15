@@ -15,7 +15,7 @@ import path from 'node:path';
 import { parseArgs } from '../args.mjs';
 import { loadConfig } from '../config.mjs';
 import { markdownToHtml, readFrontmatter } from '../markdown/md-to-html.mjs';
-import { mimeFor, resolveServedPath } from '../preview-files.mjs';
+import { assetHeaders, resolveServedPath } from '../preview-files.mjs';
 import { STYLE } from '../preview-style.mjs';
 
 export const usage = `Usage: confluence-md-sync serve [options]
@@ -308,14 +308,16 @@ export async function serve(argv) {
         }
 
         if (!target.endsWith('.md')) {
-            const mime = mimeFor(target);
-            // Refused rather than octet-streamed: see the allowlist's comment.
-            if (!mime) {
+            // An allowlisted type is served, an attachment in assets/
+            // downloads, anything else is refused rather than octet-streamed:
+            // see the allowlist's comment.
+            const headers = assetHeaders(root, target, request.headers.host);
+            if (!headers) {
                 response.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
                 response.end('Not a previewable file type.');
                 return;
             }
-            response.writeHead(200, { 'Content-Type': mime, 'Cache-Control': 'no-cache' });
+            response.writeHead(200, headers);
             response.end(await readFile(target));
             return;
         }

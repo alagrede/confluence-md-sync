@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import path from 'node:path';
 import { test } from 'node:test';
-import { mimeFor, resolveServedPath } from '../src/preview-files.mjs';
+import { assetHeaders, isAttachment, isLocalHost, mimeFor, resolveServedPath } from '../src/preview-files.mjs';
 
 const ROOT = path.resolve('/srv/docs');
 const resolve = urlPath => resolveServedPath(ROOT, urlPath);
@@ -66,4 +66,42 @@ test('anything else has no type, so the server refuses it', () => {
     for (const file of ['.env', 'secrets.js', 'app.mjs', 'id_rsa', 'dump.sql', 'a.exe', 'noext']) {
         assert.equal(mimeFor(file), null, `${file} must not be servable`);
     }
+});
+
+test('only a file inside an assets/ folder is an attachment', () => {
+    assert.equal(isAttachment(ROOT, path.join(ROOT, 'specs/assets/home/archive.zip')), true);
+    assert.equal(isAttachment(ROOT, path.join(ROOT, 'specs/home/assets/video.mp4')), true);
+    assert.equal(isAttachment(ROOT, path.join(ROOT, 'specs/archive.zip')), false);
+    assert.equal(isAttachment(ROOT, path.join(ROOT, 'assets.key')), false, 'a file called assets is not a folder');
+    assert.equal(isAttachment(ROOT, path.join(ROOT, 'my-assets/server.key')), false);
+});
+
+test('an attachment downloads, off the allowlist', () => {
+    const headers = assetHeaders(ROOT, path.join(ROOT, 'specs/assets/home/Export Jira.zip'), '127.0.0.1:4801');
+    assert.equal(headers['Content-Type'], 'application/octet-stream');
+    assert.equal(headers['Content-Disposition'], "attachment; filename*=UTF-8''Export%20Jira.zip");
+    assert.equal(headers['X-Content-Type-Options'], 'nosniff');
+});
+
+test('outside assets/, a type off the allowlist is still refused', () => {
+    assert.equal(assetHeaders(ROOT, path.join(ROOT, 'secrets.js'), '127.0.0.1:4801'), null);
+    assert.equal(assetHeaders(ROOT, path.join(ROOT, 'specs/dump.sql'), 'localhost:4801'), null);
+});
+
+test('an allowlisted type is served as itself, and an SVG in a sandbox', () => {
+    assert.equal(assetHeaders(ROOT, path.join(ROOT, 'a.png'), 'example.com')['Content-Type'], 'image/png');
+    const svg = assetHeaders(ROOT, path.join(ROOT, 'specs/assets/home/diagram.svg'), '127.0.0.1:4801');
+    assert.equal(svg['Content-Security-Policy'], 'sandbox');
+    assert.equal(svg['Content-Disposition'], undefined);
+});
+
+test('an attachment is refused to a public host name: DNS rebinding', () => {
+    assert.equal(isLocalHost('127.0.0.1:4801'), true);
+    assert.equal(isLocalHost('localhost:4801'), true);
+    assert.equal(isLocalHost('[::1]:4801'), true);
+    assert.equal(isLocalHost('192.168.1.20:4801'), true, '--host 0.0.0.0, reached by IP');
+    assert.equal(isLocalHost('my-mac.local:4801'), true);
+    assert.equal(isLocalHost('rebind.evil.example:4801'), false);
+    assert.equal(isLocalHost(undefined), false);
+    assert.equal(assetHeaders(ROOT, path.join(ROOT, 'specs/assets/home/archive.zip'), 'rebind.evil.example:4801'), null);
 });
