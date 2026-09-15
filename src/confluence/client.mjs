@@ -1,5 +1,6 @@
 // Minimal Confluence Cloud client, no dependencies. Basic auth (account email
 // + API token), as expected by Confluence Cloud's REST v1 API.
+import { existsSync } from 'node:fs';
 import { loadEnv, envFileCandidates } from '../env.mjs';
 
 export class ConfluenceError extends Error {}
@@ -20,7 +21,9 @@ export class ConfluenceClient {
         if (missing.length) {
             throw new ConfluenceError(
                 `Missing environment variable(s): ${missing.join(', ')}.\n\n${MISSING_HELP}\n\n` +
-                    `Files consulted: ${envFileCandidates(cwd).join(', ')}`
+                    `Files consulted: ${envFileCandidates(cwd)
+                        .map(file => `${file}${existsSync(file) ? '' : ' (not found)'}`)
+                        .join(', ')}`
             );
         }
         this.baseUrl = process.env.CONFLUENCE_BASE_URL.replace(/\/$/, '');

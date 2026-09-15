@@ -19,13 +19,24 @@ export function envFileCandidates(cwd = process.cwd()) {
     ].filter(Boolean);
 }
 
+/**
+ * Decodes an env file as written on any platform: Notepad may add a UTF-8 BOM,
+ * and Windows PowerShell 5's `>` / Out-File writes UTF-16 LE.
+ */
+export function readEnvFile(file) {
+    const bytes = readFileSync(file);
+    if (bytes[0] === 0xff && bytes[1] === 0xfe) return bytes.toString('utf16le').slice(1);
+    return bytes.toString('utf8').replace(/^﻿/, '');
+}
+
 /** Loads the candidate files into process.env without overwriting anything. */
 export function loadEnv(cwd = process.cwd()) {
     const loaded = [];
     for (const file of envFileCandidates(cwd)) {
         if (!existsSync(file)) continue;
         loaded.push(file);
-        for (const line of readFileSync(file, 'utf8').split('\n')) {
+        // CRLF endings are the Windows default; a stray \r makes LINE miss every line.
+        for (const line of readEnvFile(file).split(/\r?\n|\r/)) {
             const match = line.match(LINE);
             if (!match) continue;
             const [, key, rawValue] = match;
