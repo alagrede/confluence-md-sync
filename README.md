@@ -203,7 +203,7 @@ therefore work as they are, with no rewriting.
 
 The server binds `127.0.0.1` only, and serves three kinds of thing and nothing
 else: markdown rendered to HTML, files whose extension is on a fixed asset
-allowlist (images, PDF, CSS, JSON, txt, csv), and nothing at all otherwise —
+allowlist (images, PDF, Office documents, CSS, JSON, txt, csv), and nothing at all otherwise —
 an unknown extension is a 404 rather than an `application/octet-stream`
 download. Paths escaping the served root are refused, as is any path with a
 dotted segment, so `.env` and `.git/` stay unreachable even when the root is
@@ -223,7 +223,7 @@ nothing more.
 yarn docs:pull                  # replace the mirror with Confluence's state
 yarn docs:pull --only home      # only rewrite paths containing "home"
 yarn docs:pull --dry-run        # say what would change, write nothing
-yarn docs:pull --force-assets   # re-download images already present
+yarn docs:pull --force-assets   # re-download attachments already present
 yarn docs:pull --quiet          # list only the files that changed
 ```
 
@@ -253,17 +253,19 @@ Room management (HANDBOOK) → docs/specs
 it is safe to run.
 
 It walks the tree down from `rootId`, converts each page to markdown,
-downloads the referenced images, and writes a file only when it actually
-changed. Run it twice in a row and everything is reported unchanged.
+downloads the referenced attachments, and writes a file only when it actually
+changed. Images become `![](…)`; other attached files (PDF, spreadsheets,
+documents…), whether linked in the text or embedded with a file preview macro,
+become ordinary links `[label](assets/…)` to the downloaded copy. Run it twice in a row and everything is reported unchanged.
 
-**Naming.** A page **with** children becomes `<slug>/index.md`, its images in
-`<slug>/assets/`. A page **without** children becomes `<slug>.md`, its images
-in `assets/<slug>/`. The slug comes from the title — so a renamed page, or one
+**Naming.** A page **with** children becomes `<slug>/index.md`, its attachments
+in `<slug>/assets/`. A page **without** children becomes `<slug>.md`, its
+attachments in `assets/<slug>/`. The slug comes from the title — so a renamed page, or one
 that gains its first child, **changes path**.
 
 **Nothing is ever deleted.** Files that no longer match any page are listed at
-the end of the run, for you to review and then `git rm`. Same for images the
-script could not resolve.
+the end of the run, for you to review and then `git rm`. Same for attachments
+the script could not resolve.
 
 ### Updating one page at a time
 
@@ -334,13 +336,15 @@ Hence three refusals, all overridable with `--force`:
    skipped. Without this check, a repository-wide `push --apply` would flatten
    the formatting of every page nobody had touched.
 
-Guard 3 compares the text with images excluded: in the file they are asset
-paths, on the page they are attachment references, so only the prose is
-comparable. Adding an image without changing a word is therefore not seen as a
+Guard 3 compares the text with images excluded and links to attached files
+reduced to their label: in the file they are asset paths, on the page they are
+attachment references, so only the prose is comparable. Adding an image without changing a word is therefore not seen as a
 modification — use `--force` in that case.
 
-Images already attached to the page are reused by name; those added locally are
-uploaded as attachments before publishing.
+Images and linked files already attached to the page are reused by name; those
+added locally are uploaded as attachments before publishing. A link to a local
+file becomes an attachment link — a file preview macro comes back as a plain
+link, like every other macro the markdown does not carry.
 
 The mirror's `README.md` is not a Confluence page: `push` ignores it.
 
@@ -402,14 +406,15 @@ or a bot that posts markdown to Confluence:
 ```js
 import { storageToMarkdown, markdownToStorage } from '@alagrede/confluence-md-sync';
 
-const { markdown, imageRefs } = storageToMarkdown(page.body.storage.value);
+const { markdown, imageRefs, fileRefs } = storageToMarkdown(page.body.storage.value);
 const storage = markdownToStorage('## Scope\n\nA **bold** claim.');
 ```
 
 `storageToMarkdown` returns the markdown with `@@CIMGn@@` tokens where images
-were, plus the matching `imageRefs` — so the caller decides where image files
-go. `markdownToStorage` takes a resolver callback that maps a markdown image
-path to an attachment name.
+were and `@@CFILEn@@` tokens where other attachments were, plus the matching
+`imageRefs` and `fileRefs` — so the caller decides where the files go.
+`markdownToStorage` takes two resolver callbacks: one maps a markdown image path
+to an attachment name, the other does the same for a link target.
 
 See [`src/index.mjs`](src/index.mjs) for the full surface.
 

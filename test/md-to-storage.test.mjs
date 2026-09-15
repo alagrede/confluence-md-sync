@@ -104,3 +104,32 @@ test('prose survives a markdown → storage → markdown round trip', () => {
     const { markdown } = storageToMarkdown(markdownToStorage(source));
     assert.equal(markdown, source);
 });
+
+test('a link resolved to an attachment becomes an attachment link', () => {
+    const files = { 'assets/page/spec%20v2.pdf': 'spec v2.pdf' };
+    assert.equal(
+        markdownToStorage('See [the spec](assets/page/spec%20v2.pdf) or [site](https://x.y).', undefined, link =>
+            files[link] ?? null
+        ),
+        '<p>See <ac:link><ri:attachment ri:filename="spec v2.pdf" /><ac:link-body>the spec</ac:link-body></ac:link>' +
+            ' or <a href="https://x.y">site</a>.</p>'
+    );
+});
+
+test('file links are resolved in list items and table cells too', () => {
+    const resolve = link => (link === 'a.xlsx' ? 'a.xlsx' : null);
+    assert.match(markdownToStorage('- [A](a.xlsx)', undefined, resolve), /<li><ac:link><ri:attachment ri:filename="a.xlsx"/);
+    assert.match(
+        markdownToStorage('| h |\n| --- |\n| [A](a.xlsx) |', undefined, resolve),
+        /<td><ac:link><ri:attachment ri:filename="a.xlsx"/
+    );
+});
+
+test('an inline image is never resolved as a file', () => {
+    let asked = false;
+    markdownToStorage('text ![a](a.png) text', undefined, () => {
+        asked = true;
+        return 'a.png';
+    });
+    assert.equal(asked, false);
+});

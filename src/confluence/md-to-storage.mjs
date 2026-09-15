@@ -2,18 +2,27 @@
 //
 // Deliberately limited to what people actually write when editing the mirror:
 // headings, paragraphs, fenced code blocks, lists (two levels), tables,
-// images, bold, italics, inline code, links, and horizontal rules. Any other
+// images, bold, italics, inline code, links (including links to attached
+// files), and horizontal rules. Any other
 // syntax comes out as escaped text rather than being silently dropped.
 
 function escapeXml(text) {
     return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
+function escapeAttribute(text) {
+    return escapeXml(text).replace(/"/g, '&quot;');
+}
+
+function unescapeXml(text) {
+    return text.replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&');
+}
+
 /**
  * Inline markup. Code spans are set aside first so that no `*` or `[` inside
  * them gets interpreted, then restored at the end of the pass.
  */
-function inline(text) {
+function inline(text, resolveFile) {
     const codeSpans = [];
     let out = text.replace(/`([^`]+)`/g, (_, code) => {
         codeSpans.push(code);
@@ -25,7 +34,15 @@ function inline(text) {
     out = out.replace(/(^|[^*\w])\*([^*\n]+)\*(?=[^*\w]|$)/g, '$1<em>$2</em>');
     // A link label may itself contain one pair of brackets — Confluence
     // exports produce links such as [[TICKET-108] Some screen](url).
-    out = out.replace(/\[((?:[^[\]]|\[[^[\]]*\])+)\]\(([^)\s]+)\)/g, '<a href="$2">$1</a>');
+    out = out.replace(/\[((?:[^[\]]|\[[^[\]]*\])+)\]\(([^)\s]+)\)/g, (_, label, href, offset, whole) => {
+        // Behind a `!` this is an inline image, never an attached file.
+        const filename = whole[offset - 1] === '!' ? null : resolveFile(unescapeXml(href));
+        if (!filename) return `<a href="${href}">${label}</a>`;
+        return (
+            `<ac:link><ri:attachment ri:filename="${escapeAttribute(filename)}" />` +
+            `<ac:link-body>${label}</ac:link-body></ac:link>`
+        );
+    });
     out = out.replace(/\\([*_`[\]])/g, '$1');
 
     return out.replace(/@@CODE(\d+)@@/g, (_, index) => `<code>${escapeXml(codeSpans[Number(index)])}</code>`);
@@ -50,7 +67,7 @@ function splitRow(line) {
         .map(cell => cell.trim());
 }
 
-function renderList(items) {
+function renderList(items, resolveFile) {
     // The nested <ul> has to live inside its parent <li>, otherwise Confluence
     // reformats the whole list the first time the page is opened in its editor.
     const parts = [];
@@ -65,9 +82,9 @@ function renderList(items) {
 
     const renderItem = part => {
         const nested = part.children.length
-            ? '<ul>' + part.children.map(child => `<li>${inline(child)}</li>`).join('') + '</ul>'
+            ? '<ul>' + part.children.map(child => `<li>${inline(child, resolveFile)}</li>`).join('') + '</ul>'
             : '';
-        return `<li>${inline(part.text)}${nested}</li>`;
+        return `<li>${inline(part.text, resolveFile)}${nested}</li>`;
     };
 
     return '<ul>' + parts.map(renderItem).join('') + '</ul>';
@@ -78,8 +95,11 @@ function renderList(items) {
  * @param {(localPath: string, alt: string) => ({filename?: string, url?: string, alt?: string}|null)} resolveImage
  *   Resolves a markdown image path to an attachment that has already been
  *   uploaded. Returning null drops the image from the output.
+ * @param {(localPath: string) => (string|null)} resolveFile
+ *   Resolves the target of a markdown link to the name of an attachment that
+ *   has already been uploaded. Returning null keeps it an ordinary link.
  */
-export function markdownToStorage(markdown, resolveImage = () => null) {
+export function markdownToStorage(markdown, resolveImage = () => null, resolveFile = () => null) {
     const lines = markdown.replace(/\r\n/g, '\n').split('\n');
     const out = [];
     let index = 0;
@@ -124,7 +144,7 @@ export function markdownToStorage(markdown, resolveImage = () => null) {
         const heading = trimmed.match(/^(#{1,6})\s+(.*)$/);
         if (heading) {
             const level = heading[1].length;
-            out.push(`<h${level}>${inline(heading[2])}</h${level}>`);
+            out.push(`<h${level}>${inline(heading[2], resolveFile)}</h${level}>`);
             index++;
             continue;
         }
@@ -146,9 +166,9 @@ export function markdownToStorage(markdown, resolveImage = () => null) {
                 body.push(splitRow(lines[index].trim()));
                 index++;
             }
-            const head = '<tr>' + header.map(cell => `<th>${inline(cell)}</th>`).join('') + '</tr>';
+            const head = '<tr>' + header.map(cell => `<th>${inline(cell, resolveFile)}</th>`).join('') + '</tr>';
             const rows = body
-                .map(row => '<tr>' + row.map(cell => `<td>${inline(cell)}</td>`).join('') + '</tr>')
+                .map(row => '<tr>' + row.map(cell => `<td>${inline(cell, resolveFile)}</td>`).join('') + '</tr>')
                 .join('');
             out.push(`<table><tbody>${head}${rows}</tbody></table>`);
             continue;
@@ -165,7 +185,7 @@ export function markdownToStorage(markdown, resolveImage = () => null) {
                 });
                 index++;
             }
-            out.push(renderList(items));
+            out.push(renderList(items, resolveFile));
             continue;
         }
 
@@ -188,7 +208,7 @@ export function markdownToStorage(markdown, resolveImage = () => null) {
             paragraph.push(currentTrimmed);
             index++;
         }
-        if (paragraph.length) out.push(`<p>${inline(paragraph.join(' '))}</p>`);
+        if (paragraph.length) out.push(`<p>${inline(paragraph.join(' '), resolveFile)}</p>`);
     }
 
     return out.join('\n');

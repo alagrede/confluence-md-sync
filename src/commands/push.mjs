@@ -4,7 +4,7 @@
 // layouts or column widths is lost, because the markdown export does not carry
 // it. Hence the three guards: dry run by default, refusal when the page moved
 // since the last pull, and refusal when the local file was not edited.
-import { existsSync } from 'node:fs';
+import { existsSync, statSync } from 'node:fs';
 import { readdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { parseArgs } from '../args.mjs';
@@ -13,6 +13,7 @@ import { ConfluenceClient, MIME_BY_EXTENSION } from '../confluence/client.mjs';
 import { markdownToStorage } from '../confluence/md-to-storage.mjs';
 import { storageToMarkdown } from '../confluence/storage-to-md.mjs';
 import { parseMarkdownFile } from '../markdown/markdown-file.mjs';
+import { safeFilename } from '../markdown/slug.mjs';
 
 export const usage = `Usage: confluence-md-sync push [options]
 
@@ -29,20 +30,34 @@ Options:
 Exit code 2 means at least one page was blocked by a guard.
 `;
 
+/** `[label](target)` not preceded by `!`, the label allowing one level of brackets. */
+const LINK = /(?<!!)\[((?:[^[\]]|\[[^[\]]*\])+)\]\(([^)\s]+)\)/g;
+
+/** A link target that can be a local file: not a URL, an anchor, or another page. */
+const isLocalFileTarget = target => !/^[a-z][a-z0-9+.-]*:/i.test(target) && !/^#|\.md(#|$)/i.test(target);
+
 /**
  * Compares the file's prose to the live page to tell whether anyone actually
- * edited the markdown. Images are removed from the comparison: in the file they
- * are asset paths, on the page they are attachment references — only the text
- * is comparable.
+ * edited the markdown. Images are removed from the comparison and links to
+ * attached files are reduced to their label: in the file they are asset paths,
+ * on the page they are attachment references — only the text is comparable.
  */
-function sameProse(localBody, liveMarkdown) {
+export function sameProse(localBody, live) {
     const normalize = text =>
         text
             .replace(/!\[[^\]]*\]\([^)]*\)/g, '')
             .replace(/@@CIMG\d+@@/g, '')
+            // What pull writes for an attachment it could not find.
+            .replace(/_\[missing image: [^\]]*\]_/g, '')
+            .replace(/_\[missing file: ([^\]]*)\]_/g, '[$1]')
+            .replace(LINK, (whole, label, target) => (isLocalFileTarget(target) ? `[${label}]` : whole))
             .replace(/\s+/g, ' ')
             .trim();
-    return normalize(localBody) === normalize(liveMarkdown);
+    const liveText = live.markdown.replace(/@@CFILE(\d+)@@/g, (_, index) => {
+        const ref = live.fileRefs[Number(index)];
+        return `[${ref.label || ref.filename}]`;
+    });
+    return normalize(localBody) === normalize(liveText);
 }
 
 export async function push(argv) {
@@ -128,14 +143,19 @@ export async function push(argv) {
             }
 
             const live = storageToMarkdown(page.body?.storage?.value ?? '');
-            if (sameProse(body, `# ${page.title}\n\n${live.markdown}`) && !force) {
+            if (sameProse(body, { ...live, markdown: `# ${page.title}\n\n${live.markdown}` }) && !force) {
                 summary.unchanged++;
                 continue;
             }
 
             // Images already attached to the page are referenced by name; those
-            // added locally are uploaded first.
-            const attached = new Set((await client.getAttachments(pageId)).map(item => item.title));
+            // added locally are uploaded first. Pull writes attachments under
+            // safeFilename(title), so a local name matches either form.
+            const attached = new Map();
+            for (const { title } of await client.getAttachments(pageId)) {
+                attached.set(safeFilename(title), title);
+                attached.set(title, title);
+            }
             const localDir = path.dirname(mdPath);
             const images = new Map();
             for (const [, link] of body.matchAll(/!\[[^\]]*\]\(([^)\s]+)\)/g)) {
@@ -143,7 +163,7 @@ export async function push(argv) {
                 const filePath = path.resolve(localDir, decodeURIComponent(link));
                 const filename = path.basename(filePath);
                 if (attached.has(filename)) {
-                    images.set(link, filename);
+                    images.set(link, attached.get(filename));
                     continue;
                 }
                 if (!existsSync(filePath)) {
@@ -163,19 +183,58 @@ export async function push(argv) {
                 summary.attachments++;
             }
 
+            // Links to local files (PDF, spreadsheets…) become attachment links
+            // the same way. A target that is neither attached nor on disk stays
+            // an ordinary link.
+            const files = new Map();
+            for (const [, , link] of body.matchAll(LINK)) {
+                if (!isLocalFileTarget(link) || files.has(link)) continue;
+                let filePath;
+                try {
+                    filePath = path.resolve(localDir, decodeURIComponent(link));
+                } catch {
+                    continue; // malformed percent-encoding: not one of our asset paths
+                }
+                const filename = path.basename(filePath);
+                if (attached.has(filename)) {
+                    files.set(link, attached.get(filename));
+                    continue;
+                }
+                if (!existsSync(filePath) || !statSync(filePath).isFile()) {
+                    files.set(link, null);
+                    continue;
+                }
+                if (apply) {
+                    await client.uploadAttachment(
+                        pageId,
+                        filename,
+                        await readFile(filePath),
+                        MIME_BY_EXTENSION[path.extname(filename).toLowerCase()] ?? 'application/octet-stream'
+                    );
+                }
+                attached.set(filename, filename);
+                files.set(link, filename);
+                summary.attachments++;
+            }
+
             // The level-1 heading belongs to the page itself, not to its body.
             const withoutTitle = body.replace(/^#\s+.*\n+/, '');
-            const storage = markdownToStorage(withoutTitle, (link, alt) => {
-                const filename = images.get(link);
-                return filename ? { filename, alt } : null;
-            });
+            const storage = markdownToStorage(
+                withoutTitle,
+                (link, alt) => {
+                    const filename = images.get(link);
+                    return filename ? { filename, alt } : null;
+                },
+                link => files.get(link) ?? null
+            );
 
             if (print) console.log(`\n----- ${display(mdPath)} -----\n${storage}\n-----\n`);
 
             if (!apply) {
                 console.log(
                     `   →  ${display(mdPath)}\n      ${page.title} (v${liveVersion}) — ` +
-                        `${storage.length} characters, ${[...images.values()].filter(Boolean).length} image(s)`
+                        `${storage.length} characters, ${[...images.values()].filter(Boolean).length} image(s), ` +
+                        `${[...files.values()].filter(Boolean).length} file(s)`
                 );
                 summary.pushed++;
                 continue;

@@ -5,7 +5,7 @@ import { isolateImages, storageToMarkdown } from '../src/confluence/storage-to-m
 const md = storage => storageToMarkdown(storage).markdown;
 
 test('empty storage yields empty markdown', () => {
-    assert.deepEqual(storageToMarkdown(''), { markdown: '', imageRefs: [] });
+    assert.deepEqual(storageToMarkdown(''), { markdown: '', imageRefs: [], fileRefs: [] });
 });
 
 test('headings become ATX headings', () => {
@@ -109,4 +109,66 @@ test('isolateImages puts an image on its own line but leaves table rows alone', 
 
 test('a page link keeps its title', () => {
     assert.equal(md('<p><ac:link><ri:page ri:content-title="Other page" /></ac:link></p>'), '[Other page]');
+});
+
+test('a page link does not swallow the text before it', () => {
+    assert.equal(
+        md('<p>A <ac:link><ri:user ri:account-id="x" /></ac:link> B <ac:link><ri:page ri:content-title="P" /></ac:link></p>'),
+        'A  B [P]'
+    );
+});
+
+test('links to attachments become file tokens with their label', () => {
+    const result = storageToMarkdown(
+        '<p>See <ac:link><ri:attachment ri:filename="spec.pdf" />' +
+            '<ac:plain-text-link-body><![CDATA[the spec]]></ac:plain-text-link-body></ac:link>' +
+            ' and <ac:link><ri:attachment ri:filename="data.xlsx" /></ac:link>.</p>' +
+            '<p>Then <ac:link><ri:page ri:content-title="Other" /></ac:link></p>'
+    );
+    assert.equal(result.markdown, 'See @@CFILE0@@ and @@CFILE1@@.\n\nThen [Other]');
+    assert.deepEqual(result.fileRefs, [
+        { filename: 'spec.pdf', pageTitle: undefined, label: 'the spec' },
+        { filename: 'data.xlsx', pageTitle: undefined, label: undefined },
+    ]);
+});
+
+test('a rich link body gives its text as the label', () => {
+    const { fileRefs } = storageToMarkdown(
+        '<ac:link><ri:attachment ri:filename="a.docx" /><ac:link-body><strong>Doc</strong></ac:link-body></ac:link>'
+    );
+    assert.equal(fileRefs[0].label, 'Doc');
+});
+
+test('an attachment of another page keeps that page title', () => {
+    const { fileRefs } = storageToMarkdown(
+        '<ac:link><ri:attachment ri:filename="b.pdf"><ri:page ri:content-title="Caf&eacute;" /></ri:attachment></ac:link>'
+    );
+    assert.equal(fileRefs[0].pageTitle, 'Café');
+});
+
+test('file preview macros become file tokens in their own paragraph', () => {
+    const result = storageToMarkdown(
+        '<p>before</p>' +
+            '<ac:structured-macro ac:name="view-file" ac:schema-version="1">' +
+            '<ac:parameter ac:name="name"><ri:attachment ri:filename="budget.xlsx" /></ac:parameter>' +
+            '<ac:parameter ac:name="height">250</ac:parameter></ac:structured-macro>' +
+            '<ac:structured-macro ac:name="viewpdf"><ac:parameter ac:name="name">' +
+            '<ri:attachment ri:filename="plan.pdf" /></ac:parameter></ac:structured-macro>' +
+            '<p>after</p>'
+    );
+    assert.equal(result.markdown, 'before\n\n@@CFILE0@@\n\n@@CFILE1@@\n\nafter');
+    assert.deepEqual(
+        result.fileRefs.map(ref => ref.filename),
+        ['budget.xlsx', 'plan.pdf']
+    );
+});
+
+test('a thumbnail linking to a file keeps both the image and the file', () => {
+    const result = storageToMarkdown(
+        '<p><ac:link><ri:attachment ri:filename="deck.pdf" /><ac:link-body>' +
+            '<ac:image><ri:attachment ri:filename="thumb.png" /></ac:image></ac:link-body></ac:link></p>'
+    );
+    assert.equal(result.markdown, '@@CIMG0@@ @@CFILE0@@');
+    assert.equal(result.imageRefs[0].filename, 'thumb.png');
+    assert.equal(result.fileRefs[0].filename, 'deck.pdf');
 });

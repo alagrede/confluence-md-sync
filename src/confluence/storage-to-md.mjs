@@ -197,14 +197,59 @@ function tokenizeImages(storage, refs) {
     });
 }
 
+/** Macros that embed an attached file (PDF, spreadsheet, document…) in the page. */
+const FILE_MACRO =
+    /<ac:structured-macro[^>]*ac:name="(?:view-file|viewpdf|viewxls|viewdoc|viewppt)"[^>]*>([\s\S]*?)<\/ac:structured-macro>/g;
+
 /**
- * @returns {{ markdown: string, imageRefs: Array }} markdown holding
- * `@@CIMGn@@` tokens in place of images, plus the matching references.
+ * Same idea as tokenizeImages, for attachments that are not images: links to
+ * an attachment and the file-preview macros. Runs after tokenizeImages, so a
+ * link wrapping an image has already been reduced to its image token.
+ */
+function tokenizeFiles(storage, refs) {
+    const collect = (inner, label) => {
+        const filename = inner.match(/<ri:attachment[^>]*ri:filename="([^"]*)"/)?.[1];
+        if (!filename) return null;
+        const pageTitle = inner.match(/<ri:page[^>]*ri:content-title="([^"]*)"/)?.[1];
+        refs.push({
+            filename: decodeEntities(filename),
+            pageTitle: pageTitle && decodeEntities(pageTitle),
+            label: label || undefined,
+        });
+        return `@@CFILE${refs.length - 1}@@`;
+    };
+
+    let text = storage.replace(/<ac:link\b[^>]*>([\s\S]*?)<\/ac:link>/g, (whole, inner) => {
+        if (!/<ri:attachment\b/.test(inner)) return whole;
+        // A thumbnail linking to a file: the image keeps its token and the
+        // file is linked right after it, under its own name.
+        const images = inner.match(/@@CIMG\d+@@/g);
+        const label = images
+            ? ''
+            : inner.match(/<ac:plain-text-link-body><!\[CDATA\[([\s\S]*?)\]\]>/)?.[1] ??
+              stripTags(inner.match(/<ac:link-body>([\s\S]*?)<\/ac:link-body>/)?.[1] ?? '');
+        const token = collect(inner, label.trim());
+        if (!token) return images ? images.join(' ') : whole;
+        return images ? `${images.join(' ')} ${token}` : token;
+    });
+    // Block-level: kept in its own paragraph so it does not glue to the next one.
+    text = text.replace(FILE_MACRO, (whole, inner) => {
+        const token = collect(inner);
+        return token ? `<p>${token}</p>` : '';
+    });
+    return text;
+}
+
+/**
+ * @returns {{ markdown: string, imageRefs: Array, fileRefs: Array }} markdown
+ * holding `@@CIMGn@@` tokens in place of images and `@@CFILEn@@` tokens in
+ * place of other attachments, plus the matching references.
  */
 export function storageToMarkdown(storage) {
-    if (!storage) return { markdown: '', imageRefs: [] };
+    if (!storage) return { markdown: '', imageRefs: [], fileRefs: [] };
     const imageRefs = [];
-    let text = tokenizeImages(storage, imageRefs);
+    const fileRefs = [];
+    let text = tokenizeFiles(tokenizeImages(storage, imageRefs), fileRefs);
 
     // Macros: code blocks, panels, page links
     text = text.replace(
@@ -218,10 +263,12 @@ export function storageToMarkdown(storage) {
         /<ac:structured-macro[^>]*ac:name="(info|note|warning|tip|panel)"[\s\S]*?<ac:rich-text-body>([\s\S]*?)<\/ac:rich-text-body>[\s\S]*?<\/ac:structured-macro>/g,
         (_, kind, inner) => `\n> **${kind.toUpperCase()}** ${inner}\n`
     );
-    text = text.replace(
-        /<ac:link[\s\S]*?<ri:page[^>]*ri:content-title="([^"]*)"[\s\S]*?<\/ac:link>/g,
-        (_, title) => `[${title}]`
-    );
+    // One link at a time: a pattern spanning from `<ac:link` to the next
+    // `<ri:page` would swallow everything between two unrelated links.
+    text = text.replace(/<ac:link\b[^>]*>([\s\S]*?)<\/ac:link>/g, (whole, inner) => {
+        const title = inner.match(/<ri:page[^>]*ri:content-title="([^"]*)"/)?.[1];
+        return title === undefined ? whole : `[${title}]`;
+    });
     text = text.replace(/<ac:structured-macro[\s\S]*?<\/ac:structured-macro>/g, '');
     text = text.replace(/<ac:[^>]*>/g, '').replace(/<\/ac:[^>]*>/g, '');
     text = text.replace(/<ri:[^>]*\/?>/g, '');
@@ -252,7 +299,7 @@ export function storageToMarkdown(storage) {
     text = repairEmphasis(text);
     text = text.replace(/\n{3,}/g, '\n\n').trim();
 
-    return { markdown: text, imageRefs };
+    return { markdown: text, imageRefs, fileRefs };
 }
 
 /**

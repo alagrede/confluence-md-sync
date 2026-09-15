@@ -1,5 +1,5 @@
 // Confluence → local markdown. The output directory is a mirror: every page is
-// rewritten to match Confluence, and referenced images are downloaded into the
+// rewritten to match Confluence, and referenced attachments are downloaded into the
 // neighbouring assets/ folders. Nothing hand-written in the mirror survives a
 // pull — changes that should last are published with `push`.
 import { existsSync } from 'node:fs';
@@ -41,7 +41,7 @@ export async function pull(argv) {
     assertSyncable(config);
     const client = new ConfluenceClient({ cwd: config.root });
 
-    const stats = { created: 0, updated: 0, unchanged: 0, skipped: 0, assets: 0, missingImages: [] };
+    const stats = { created: 0, updated: 0, unchanged: 0, skipped: 0, assets: 0, missing: [] };
     const seenFiles = new Set();
 
     const attachmentsByPage = new Map();
@@ -55,16 +55,41 @@ export async function pull(argv) {
     }
 
     /**
-     * Resolves the `@@CIMGn@@` tokens: downloads each referenced attachment and
-     * replaces the token with a markdown link relative to the file.
+     * Resolves the `@@CIMGn@@` and `@@CFILEn@@` tokens: downloads each
+     * referenced attachment and replaces the token with a markdown image or
+     * link relative to the file.
      */
-    async function resolveImages(markdown, refs, page, mdPath, assetsDir) {
+    async function resolveAttachments(markdown, { imageRefs, fileRefs }, page, mdPath, assetsDir) {
         let out = markdown;
         const own = await attachmentsOf(page.id);
         const written = new Map();
 
-        for (let index = 0; index < refs.length; index++) {
-            const ref = refs[index];
+        /** Downloads the attachment once per page; null when it cannot be found. */
+        async function localPath(ref) {
+            if (written.has(ref.filename)) return written.get(ref.filename);
+            let attachment = own.get(ref.filename);
+            if (!attachment && ref.pageTitle) {
+                // Attached to a different page than the one showing it.
+                const other = await client.findPageByTitle(page.space?.key, ref.pageTitle);
+                if (other?.id) attachment = (await attachmentsOf(other.id)).get(ref.filename);
+            }
+            if (!attachment) return null;
+
+            const target = path.join(assetsDir, safeFilename(ref.filename));
+            if (forceAssets || !existsSync(target)) {
+                if (!dryRun) {
+                    await mkdir(assetsDir, { recursive: true });
+                    await writeFile(target, await client.download(attachment._links.download));
+                }
+                stats.assets++;
+            }
+            const relative = encodePath(path.relative(path.dirname(mdPath), target));
+            written.set(ref.filename, relative);
+            return relative;
+        }
+
+        for (let index = 0; index < imageRefs.length; index++) {
+            const ref = imageRefs[index];
             const token = `@@CIMG${index}@@`;
             if (!out.includes(token)) continue; // image swallowed by a dropped macro
 
@@ -72,34 +97,28 @@ export async function pull(argv) {
                 out = out.replace(token, `![${ref.alt || 'image'}](${ref.externalUrl})`);
                 continue;
             }
-
-            let attachment = own.get(ref.filename);
-            if (!attachment && ref.pageTitle) {
-                // Image attached to a different page than the one showing it.
-                const other = await client.findPageByTitle(page.space?.key, ref.pageTitle);
-                if (other?.id) attachment = (await attachmentsOf(other.id)).get(ref.filename);
-            }
-            if (!attachment) {
-                stats.missingImages.push(`${page.title} → ${ref.filename}`);
+            const relative = await localPath(ref);
+            if (!relative) {
+                stats.missing.push(`${page.title} → ${ref.filename}`);
                 out = out.replace(token, `_[missing image: ${ref.filename}]_`);
                 continue;
             }
-
-            let relative = written.get(ref.filename);
-            if (!relative) {
-                const target = path.join(assetsDir, safeFilename(ref.filename));
-                if (forceAssets || !existsSync(target)) {
-                    if (!dryRun) {
-                        await mkdir(assetsDir, { recursive: true });
-                        await writeFile(target, await client.download(attachment._links.download));
-                    }
-                    stats.assets++;
-                }
-                relative = encodePath(path.relative(path.dirname(mdPath), target));
-                written.set(ref.filename, relative);
-            }
             const alt = (ref.alt || ref.filename).replace(/\.(png|jpe?g|gif|svg|webp|bmp)$/i, '');
             out = out.replace(token, `![${alt}](${relative})`);
+        }
+
+        for (let index = 0; index < fileRefs.length; index++) {
+            const ref = fileRefs[index];
+            const token = `@@CFILE${index}@@`;
+            if (!out.includes(token)) continue;
+
+            const relative = await localPath(ref);
+            if (!relative) {
+                stats.missing.push(`${page.title} → ${ref.filename}`);
+                out = out.replace(token, `_[missing file: ${ref.filename}]_`);
+                continue;
+            }
+            out = out.replace(token, `[${ref.label || ref.filename}](${relative})`);
         }
         return out;
     }
@@ -153,10 +172,11 @@ export async function pull(argv) {
             // The conversion is local and costs no network call, so we always run
             // it: it yields the image count used by the index. Only writing the
             // file and downloading attachments are subject to --only.
-            const { markdown, imageRefs } = storageToMarkdown(page.body?.storage?.value ?? '');
+            const converted = storageToMarkdown(page.body?.storage?.value ?? '');
+            const { markdown, imageRefs, fileRefs } = converted;
 
             if (!only || mdPath.includes(only)) {
-                const body = isolateImages(await resolveImages(markdown, imageRefs, page, mdPath, assetsDir));
+                const body = isolateImages(await resolveAttachments(markdown, converted, page, mdPath, assetsDir));
                 await writePage(mdPath, page, body);
             } else {
                 // Outside the pattern: mark it seen so it is not reported as orphaned.
@@ -174,6 +194,7 @@ export async function pull(argv) {
                     relative: encodePath(path.relative(outDir, mdPath)),
                     url: `${client.baseUrl}${page._links?.webui ?? ''}`,
                     images: imageRefs.length,
+                    files: fileRefs.length,
                 });
             }
 
@@ -187,15 +208,14 @@ export async function pull(argv) {
         const body = [
             `Markdown export of the Confluence pages under [${root.title}](${rootUrl})` +
                 `${root.space?.key ? ` (space ${root.space.key})` : ''}, in Confluence's own tree order. ` +
-                `Screenshots and mockups are downloaded into the \`assets/\` folders.`,
+                `Screenshots, mockups and attached files are downloaded into the \`assets/\` folders.`,
             '',
             'Regenerated by `confluence-md-sync pull`. Edits made here do not survive the next pull.',
             '',
             ...index.map(
                 entry =>
-                    `${'  '.repeat(entry.depth)}- [${entry.title}](${entry.relative}) — ${
-                        entry.images
-                    } image(s) — [Confluence](${entry.url})`
+                    `${'  '.repeat(entry.depth)}- [${entry.title}](${entry.relative}) — ${entry.images} image(s)` +
+                    `${entry.files ? `, ${entry.files} file(s)` : ''} — [Confluence](${entry.url})`
             ),
         ].join('\n');
 
@@ -219,8 +239,8 @@ export async function pull(argv) {
             `, ${stats.assets} attachment(s) downloaded.`
     );
     if (only) console.log(`--only pattern: "${only}". The index README.md was regenerated for the whole mirror.`);
-    if (stats.missingImages.length) {
-        console.log(`\nUnresolved images:\n  ${stats.missingImages.join('\n  ')}`);
+    if (stats.missing.length) {
+        console.log(`\nUnresolved attachments:\n  ${stats.missing.join('\n  ')}`);
     }
 
     // .md files that no longer match any page. Nothing is deleted; they are
