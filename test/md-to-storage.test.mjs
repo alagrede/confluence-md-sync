@@ -133,3 +133,18 @@ test('an inline image is never resolved as a file', () => {
     });
     assert.equal(asked, false);
 });
+
+test('an image inside a table cell becomes an attachment image, not a link', () => {
+    const resolve = (link, alt) => ({ filename: link.split('/').pop(), alt });
+    assert.equal(
+        markdownToStorage('| Screen | Notes |\n| --- | --- |\n| ![Login](assets/p/login.png)![b](b.png) | text |', resolve),
+        '<table><tbody><tr><th>Screen</th><th>Notes</th></tr><tr><td>' +
+            '<ac:image ac:alt="Login"><ri:attachment ri:filename="login.png" /></ac:image>' +
+            '<ac:image ac:alt="b"><ri:attachment ri:filename="b.png" /></ac:image>' +
+            '</td><td>text</td></tr></tbody></table>'
+    );
+});
+
+test('an inline image that cannot be resolved is dropped, like a standalone one', () => {
+    assert.equal(markdownToStorage('| a |\n| --- |\n| x ![a](a.png) |'), '<table><tbody><tr><th>a</th></tr><tr><td>x </td></tr></tbody></table>');
+});

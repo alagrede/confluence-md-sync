@@ -172,3 +172,10 @@ test('a thumbnail linking to a file keeps both the image and the file', () => {
     assert.equal(result.imageRefs[0].filename, 'thumb.png');
     assert.equal(result.fileRefs[0].filename, 'deck.pdf');
 });
+
+test('blocks inside a table cell are separated, not glued together', () => {
+    assert.equal(
+        md('<table><tr><th><p>A</p></th></tr><tr><td><p>Line 1</p><p>Line 2<br />Line 3</p></td></tr></table>'),
+        '| A |\n| --- |\n| Line 1 Line 2 Line 3 |'
+    );
+});

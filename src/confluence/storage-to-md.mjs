@@ -161,8 +161,11 @@ function convertTable(table) {
     const rows = [...table.matchAll(/<tr[^>]*>([\s\S]*?)<\/tr>/g)].map(m => m[1]);
     const lines = [];
     rows.forEach((row, index) => {
+        // A cell holds whole blocks, but a markdown row is a single line: each
+        // block boundary becomes a space so paragraphs do not run together.
         const cells = [...row.matchAll(/<t[hd][^>]*>([\s\S]*?)<\/t[hd]>/g)].map(m =>
-            stripTags(m[1]).replace(/\n/g, ' ')
+            stripTags(m[1].replace(/<\/(?:p|h[1-6]|div)>|<br\s*\/?>/g, '\n'))
+                .replace(/\s*\n\s*/g, ' ')
         );
         if (!cells.length) return;
         lines.push('| ' + cells.join(' | ') + ' |');
