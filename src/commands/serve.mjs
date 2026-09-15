@@ -360,13 +360,26 @@ export async function serve(argv) {
                 );
             }
             console.log('Ctrl+C to stop.');
-            if (args.has('--open')) {
-                const opener =
-                    process.platform === 'darwin' ? 'open' : process.platform === 'win32' ? 'start' : 'xdg-open';
-                spawn(opener, [url], { stdio: 'ignore', detached: true }).unref();
-            }
+            if (args.has('--open')) openBrowser(url);
         });
     }
 
     listen(basePort);
+}
+
+/**
+ * Best effort: a missing opener must never take the server down with it.
+ * `start` is a cmd.exe builtin, not an executable, so Windows goes through cmd;
+ * the empty "" is start's window title, without which it takes the URL for one.
+ */
+function openBrowser(url) {
+    const [command, commandArgs, options] =
+        process.platform === 'darwin'
+            ? ['open', [url], {}]
+            : process.platform === 'win32'
+              ? ['cmd', ['/c', 'start', '""', `"${url}"`], { windowsVerbatimArguments: true }]
+              : ['xdg-open', [url], {}];
+    const child = spawn(command, commandArgs, { ...options, stdio: 'ignore', detached: true });
+    child.on('error', () => console.log(`Could not open a browser; visit ${url} yourself.`));
+    child.unref();
 }
