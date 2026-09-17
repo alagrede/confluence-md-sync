@@ -32,16 +32,26 @@ export async function pull(argv) {
         flags: ['--dry-run', '--force-assets', '--quiet'],
         options: ['--only'],
     });
-    const dryRun = args.has('--dry-run');
-    const forceAssets = args.has('--force-assets');
-    const quiet = args.has('--quiet');
-    const only = args.options.only ?? null;
+    await runPull({
+        dryRun: args.has('--dry-run'),
+        forceAssets: args.has('--force-assets'),
+        quiet: args.has('--quiet'),
+        only: args.options.only ?? null,
+    });
+}
 
+/**
+ * The pull itself, also run by `push` to refresh what it just published.
+ * `pageIds`, when given, restricts writing to those pages the same way `--only`
+ * restricts it to matching paths: the tree is still walked in full.
+ */
+export async function runPull({ dryRun = false, forceAssets = false, quiet = false, only = null, pageIds = null } = {}) {
     const config = await loadConfig();
     assertSyncable(config);
     const client = new ConfluenceClient({ cwd: config.root });
 
     const stats = { created: 0, updated: 0, unchanged: 0, skipped: 0, assets: 0, missing: [] };
+    const selected = (mdPath, page) => (!only || mdPath.includes(only)) && (!pageIds || pageIds.has(String(page.id)));
     const seenFiles = new Set();
 
     const attachmentsByPage = new Map();
@@ -175,19 +185,19 @@ export async function pull(argv) {
             const converted = storageToMarkdown(page.body?.storage?.value ?? '');
             const { markdown, imageRefs, fileRefs } = converted;
 
-            if (!only || mdPath.includes(only)) {
+            if (selected(mdPath, page)) {
                 const body = isolateImages(await resolveAttachments(markdown, converted, page, mdPath, assetsDir));
                 await writePage(mdPath, page, body);
             } else {
                 // Outside the pattern: mark it seen so it is not reported as orphaned.
                 seenFiles.add(mdPath);
                 stats.skipped++;
-                if (!quiet) console.log(`   ·  ${display(config, mdPath)}   (outside --only)`);
+                if (!quiet) console.log(`   ·  ${display(config, mdPath)}   (outside ${only ? '--only' : 'the selection'})`);
             }
 
             // The index describes the mirror: a page that --only skipped and that
             // was never pulled is left out, otherwise it would link nowhere.
-            if (existsSync(mdPath) || (!dryRun && (!only || mdPath.includes(only)))) {
+            if (existsSync(mdPath) || (!dryRun && selected(mdPath, page))) {
                 index.push({
                     depth,
                     title: page.title,
@@ -235,7 +245,7 @@ export async function pull(argv) {
 
     console.log(
         `\n${stats.created} created, ${stats.updated} updated, ${stats.unchanged} unchanged` +
-            (only ? `, ${stats.skipped} outside the pattern` : '') +
+            (only || pageIds ? `, ${stats.skipped} outside the ${only ? 'pattern' : 'selection'}` : '') +
             `, ${stats.assets} attachment(s) downloaded.`
     );
     if (only) console.log(`--only pattern: "${only}". The index README.md was regenerated for the whole mirror.`);

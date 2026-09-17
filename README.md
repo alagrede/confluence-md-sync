@@ -174,7 +174,7 @@ is also the starting point for `push` when you fix a page from the repository.
 
 **The consequence worth internalising: nothing hand-written in the mirror
 survives a `pull`.** A correction is only safe once published. So the cycle is
-`pull`, edit, `push --apply`, `pull`.
+`pull`, edit, `push --apply` — which pulls the published pages again by itself.
 
 Content that must *not* go to Confluence — working notes, a gap analysis —
 does not belong in `outDir`. Put it elsewhere in the repository (and show it in
@@ -308,11 +308,8 @@ yarn docs:pull
 # 3. see what would be published — dry run by default
 yarn docs:push --only the-page
 
-# 4. publish
+# 4. publish — the published pages are pulled again right after
 yarn docs:push --only the-page --apply
-
-# 5. refresh the version numbers in the frontmatter
-yarn docs:pull
 ```
 
 | Option | Effect |
@@ -322,6 +319,22 @@ yarn docs:pull
 | `--only <pattern>` | only handle files whose path contains `<pattern>` |
 | `--force` | override the version and modification guards |
 | `--print` | print the generated storage format |
+| `--no-pull` | do not pull the published pages afterwards |
+
+### After publishing
+
+Once the pages are published, `push --apply` pulls **those pages only**, so
+their files carry the new `version` and `updated` date (and the body exactly
+as `pull` writes it, which keeps the next `git diff` clean). The next `push`
+therefore passes the version guard without a manual `pull`.
+
+The rest of the mirror is not rewritten: a page blocked by a guard, or left out
+by `--only`, keeps its local edits. The whole tree is still walked, like
+`pull --only`, so the `README.md` index is regenerated too.
+
+A file that was moved or renamed locally is not where `pull` writes its page,
+so it cannot be refreshed: `push` says so, and a full `pull` sorts it out. If
+the refresh itself fails, the pages remain published — run `pull`.
 
 ### What `push` replaces, and the three guards
 

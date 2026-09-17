@@ -14,18 +14,21 @@ import { markdownToStorage } from '../confluence/md-to-storage.mjs';
 import { storageToMarkdown } from '../confluence/storage-to-md.mjs';
 import { parseMarkdownFile } from '../markdown/markdown-file.mjs';
 import { safeFilename } from '../markdown/slug.mjs';
+import { runPull } from './pull.mjs';
 
 export const usage = `Usage: confluence-md-sync push [options]
 
 Publishes edited mirror files back to their Confluence pages. Replaces the page
 body with the rendered markdown; macros and layouts the markdown cannot carry
-are lost.
+are lost. Published pages are then pulled again, so their files carry the new
+version number and publication date.
 
 Options:
   --apply            actually publish (without it, nothing is written)
   --only <pattern>   only handle files whose path contains <pattern>
   --force            publish despite a version gap or an unmodified file
   --print            print the generated storage format
+  --no-pull          do not pull the published pages afterwards
 
 Exit code 2 means at least one page was blocked by a guard.
 `;
@@ -62,12 +65,13 @@ export function sameProse(localBody, live) {
 
 export async function push(argv) {
     const args = parseArgs(argv, {
-        flags: ['--apply', '--force', '--print'],
+        flags: ['--apply', '--force', '--print', '--no-pull'],
         options: ['--only'],
     });
     const apply = args.has('--apply');
     const force = args.has('--force');
     const print = args.has('--print');
+    const refresh = !args.has('--no-pull');
     const only = args.options.only ?? null;
 
     const config = await loadConfig();
@@ -95,6 +99,8 @@ export async function push(argv) {
     }
 
     const summary = { pushed: 0, skipped: 0, blocked: 0, unchanged: 0, attachments: 0 };
+    /** Page id → { mdPath, version } for every page actually published. */
+    const published = new Map();
 
     for (const source of config.sources) {
         const candidates = await collectCandidates(source.outDir);
@@ -240,7 +246,7 @@ export async function push(argv) {
                 continue;
             }
 
-            await client.updatePage({
+            const updated = await client.updatePage({
                 id: page.id,
                 title: page.title,
                 type: page.type,
@@ -248,7 +254,9 @@ export async function push(argv) {
                 version: liveVersion,
                 storage,
             });
-            console.log(`   ✓  ${page.title} → v${liveVersion + 1}`);
+            const newVersion = updated?.version?.number ?? liveVersion + 1;
+            console.log(`   ✓  ${page.title} → v${newVersion}`);
+            published.set(String(page.id), { mdPath, version: newVersion });
             summary.pushed++;
         }
     }
@@ -259,7 +267,37 @@ export async function push(argv) {
             `${summary.blocked} blocked, ${summary.skipped} skipped.`
     );
     if (!apply && summary.pushed) {
-        console.log('\nRe-run with --apply to publish. A `pull` afterwards refreshes the version numbers.');
+        console.log('\nRe-run with --apply to publish.');
     }
+
+    if (published.size && refresh) await refreshPublished(published, display);
+    else if (published.size) console.log('\nRun `pull` to refresh the version numbers in the frontmatter.');
     if (summary.blocked) process.exitCode = 2;
+}
+
+/**
+ * Pulls the pages just published, and only those: other files in the mirror
+ * may hold edits that were blocked or not selected, and must survive.
+ */
+async function refreshPublished(published, display) {
+    console.log(`\nRefreshing ${published.size} published page(s) from Confluence…`);
+    try {
+        await runPull({ quiet: true, pageIds: new Set(published.keys()) });
+    } catch (error) {
+        // The pages are published at this point: a failed refresh is not a failed push.
+        console.log(`\n   !  Refresh failed: ${error.message}\n      Run \`pull\` to update the frontmatter.`);
+        return;
+    }
+
+    // Pull writes a page at the path its title dictates. A file that was moved
+    // or renamed locally is not that path, and still holds the old version.
+    for (const { mdPath, version } of published.values()) {
+        const { frontmatter } = parseMarkdownFile(await readFile(mdPath, 'utf8'));
+        if (String(frontmatter.version) !== String(version)) {
+            console.log(
+                `   !  ${display(mdPath)} is still at version ${frontmatter.version}: ` +
+                    'pull writes this page elsewhere. Run `pull` and review the result.'
+            );
+        }
+    }
 }
