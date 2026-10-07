@@ -38,10 +38,11 @@ function inline(text) {
     // Bare URLs in angle brackets, which escaping turned into &lt;…&gt;
     out = out.replace(/&lt;(https?:\/\/[^\s&]+)&gt;/g, '<a href="$1">$1</a>');
     out = out.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+    out = out.replace(/~~([^~\n]+)~~/g, '<del>$1</del>');
     out = out.replace(/(^|[^*\w])\*([^*\n]+)\*(?=[^*\w]|$)/g, '$1<em>$2</em>');
 
     // Markdown escapes: a source \* must come out as a literal *
-    out = out.replace(/\\([*_`[\]#])/g, '$1');
+    out = out.replace(/\\([*_~`[\]#])/g, '$1');
 
     return out.replace(/@@CODE(\d+)@@/g, (_, index) => `<code>${escapeHtml(codeSpans[Number(index)])}</code>`);
 }

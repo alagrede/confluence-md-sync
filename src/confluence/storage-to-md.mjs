@@ -1,8 +1,8 @@
 // Confluence "storage format" (XHTML) → markdown.
 //
 // Not exhaustive: it covers what design and specification pages actually
-// contain — headings, bold, italics, lists, tables, links, images, and the
-// code and panel macros. Anything else is reduced to its text content.
+// contain — headings, bold, italics, strikethrough, lists, tables, links,
+// images, and the code and panel macros. Anything else is reduced to its text content.
 
 import { repairEmphasis } from '../markdown/emphasis.mjs';
 
@@ -285,6 +285,13 @@ export function storageToMarkdown(storage) {
 
     text = text.replace(/<(strong|b)[^>]*>([\s\S]*?)<\/\1>/g, (_, __, inner) => emphasise('**', inner));
     text = text.replace(/<(em|i)[^>]*>([\s\S]*?)<\/\1>/g, (_, __, inner) => emphasise('*', inner));
+    // Strikethrough reaches us in both shapes: the styled span the storage
+    // format documents, and the bare tags the current editor also produces.
+    text = text.replace(
+        /<span[^>]*text-decoration:\s*line-through[^>]*>([\s\S]*?)<\/span>/g,
+        (_, inner) => emphasise('~~', inner)
+    );
+    text = text.replace(/<(s|del|strike)[^>]*>([\s\S]*?)<\/\1>/g, (_, __, inner) => emphasise('~~', inner));
     text = text.replace(/<code[^>]*>([\s\S]*?)<\/code>/g, (_, inner) => `\`${stripTags(inner)}\``);
     text = text.replace(
         /<a[^>]*href="([^"]*)"[^>]*>([\s\S]*?)<\/a>/g,

@@ -148,3 +148,23 @@ test('an image inside a table cell becomes an attachment image, not a link', () 
 test('an inline image that cannot be resolved is dropped, like a standalone one', () => {
     assert.equal(markdownToStorage('| a |\n| --- |\n| x ![a](a.png) |'), '<table><tbody><tr><th>a</th></tr><tr><td>x </td></tr></tbody></table>');
 });
+
+test('strikethrough becomes the storage format styled span', () => {
+    assert.equal(
+        markdownToStorage('a ~~b~~ c'),
+        '<p>a <span style="text-decoration: line-through;">b</span> c</p>'
+    );
+});
+
+test('strikethrough survives a markdown → storage → markdown round trip', () => {
+    const source = 'A ~~dropped~~ requirement.';
+    assert.equal(storageToMarkdown(markdownToStorage(source)).markdown, source);
+});
+
+test('a tilde inside a code span is not strikethrough', () => {
+    assert.equal(markdownToStorage('`~~a~~`'), '<p><code>~~a~~</code></p>');
+});
+
+test('an escaped tilde stays literal text', () => {
+    assert.equal(markdownToStorage('\\~\\~a\\~\\~'), '<p>~~a~~</p>');
+});

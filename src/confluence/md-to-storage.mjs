@@ -2,8 +2,8 @@
 //
 // Deliberately limited to what people actually write when editing the mirror:
 // headings, paragraphs, fenced code blocks, lists (two levels), tables,
-// images, bold, italics, inline code, links (including links to attached
-// files), and horizontal rules. Any other
+// images, bold, italics, strikethrough, inline code, links (including links to
+// attached files), and horizontal rules. Any other
 // syntax comes out as escaped text rather than being silently dropped.
 
 function escapeXml(text) {
@@ -38,6 +38,9 @@ function inline(text, resolve) {
 
     out = escapeXml(out);
     out = out.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+    // Confluence has no <s> in its documented storage format: strikethrough is
+    // a styled span, which both the legacy and the current editor render.
+    out = out.replace(/~~([^~\n]+)~~/g, '<span style="text-decoration: line-through;">$1</span>');
     out = out.replace(/(^|[^*\w])\*([^*\n]+)\*(?=[^*\w]|$)/g, '$1<em>$2</em>');
     // A link label may itself contain one pair of brackets — Confluence
     // exports produce links such as [[TICKET-108] Some screen](url).
@@ -49,7 +52,7 @@ function inline(text, resolve) {
             `<ac:link-body>${label}</ac:link-body></ac:link>`
         );
     });
-    out = out.replace(/\\([*_`[\]])/g, '$1');
+    out = out.replace(/\\([*_~`[\]])/g, '$1');
 
     return out
         .replace(/@@IMG(\d+)@@/g, (_, index) => images[Number(index)])

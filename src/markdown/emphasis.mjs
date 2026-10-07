@@ -79,11 +79,13 @@ function codeSpans(line) {
 
 const FENCE = /^ {0,3}(`{3,}|~{3,})/;
 
-// `**bold**` and `*italic*`, the two shapes this converter emits. An escaped
-// `\*` is not a delimiter, and `**` is never read as two `*` runs.
+// `**bold**`, `*italic*` and `~~struck~~`, the three shapes this converter
+// emits. An escaped `\*` is not a delimiter, and `**` is never read as two `*`
+// runs. GFM gives `~~` the same flanking rules, so it needs the same repair.
 const RUNS = [
     { marker: '**', pattern: /(?<!\\)\*\*([^*\n]+)\*\*/g },
     { marker: '*', pattern: /(?<![*\\])\*([^*\n]+)\*(?!\*)/g },
+    { marker: '~~', pattern: /(?<!\\)~~([^~\n]+)~~/g },
 ];
 
 /**
@@ -102,7 +104,7 @@ export function repairEmphasis(markdown) {
                 fenced = !fenced;
                 return line;
             }
-            if (fenced || !line.includes('*')) return line;
+            if (fenced || !/[*~]/.test(line)) return line;
 
             let repaired = line;
             for (const { marker, pattern } of RUNS) {

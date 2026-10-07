@@ -384,10 +384,16 @@ The mirror's `README.md` is not a Confluence page: `push` ignores it.
   Enough to read and to review, not enough to rebuild the page identically —
   which is exactly why guard 3 exists.
 - **markdown → storage covers** headings, paragraphs, fenced code blocks,
-  lists (2 levels), tables, images, bold, italics, inline code, links and
+  lists (2 levels), tables, images, bold, italics, strikethrough, inline code, links and
   horizontal rules. Anything else comes out as escaped text rather than being
   silently dropped — visible in the `push` dry run, and fixable, instead of
   vanishing.
+- **Strikethrough goes both ways.** `~~text~~` is published as the styled
+  span the storage format documents
+  (`<span style="text-decoration: line-through;">`), and a page struck through
+  in Confluence pulls back as `~~text~~` — whether the page carries that span
+  or a bare `<s>`, `<del>` or `<strike>`, all four of which Confluence's
+  editors produce.
 - **Blockquotes are one-way.** Confluence's `info` / `note` / `warning` panels
   pull as blockquotes, but markdown → storage has no blockquote case, so
   pushing one back produces a paragraph starting with a literal `>`:

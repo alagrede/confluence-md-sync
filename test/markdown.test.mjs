@@ -104,3 +104,8 @@ test('an unquoted frontmatter value is taken as-is', () => {
 test('a value that only looks quoted does not throw', () => {
     assert.equal(parseMarkdownFile('---\ntitle: "unclosed\n---\n\nx').frontmatter.title, '"unclosed');
 });
+
+test('the preview renders strikethrough', () => {
+    const { html } = markdownToHtml('a ~~b~~ c');
+    assert.match(html, /a <del>b<\/del> c/);
+});

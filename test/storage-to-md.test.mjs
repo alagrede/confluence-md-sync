@@ -179,3 +179,17 @@ test('blocks inside a table cell are separated, not glued together', () => {
         '| A |\n| --- |\n| Line 1 Line 2 Line 3 |'
     );
 });
+
+test('both strikethrough shapes become ~~', () => {
+    assert.equal(md('<p><span style="text-decoration: line-through;">gone</span></p>'), '~~gone~~');
+    assert.equal(md('<p><s>gone</s></p>'), '~~gone~~');
+    assert.equal(md('<p><del>gone</del></p>'), '~~gone~~');
+});
+
+test('a space inside the strikethrough tags is moved outside the markers', () => {
+    assert.equal(md('<p><s>Obsolete </s>since v2</p>'), '~~Obsolete~~ since v2');
+});
+
+test('strikethrough glued to punctuation is repaired so readers render it', () => {
+    assert.equal(md('<p><s>Section 3:</s>removed</p>'), '~~Section 3:~~ removed');
+});
