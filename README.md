@@ -321,6 +321,9 @@ yarn docs:push --only the-page --apply
 | `--print` | print the generated storage format |
 | `--no-pull` | do not pull the published pages afterwards |
 
+Pages listed in `pushExclude` are never published — see
+[Keeping a page out of `push`](#keeping-a-page-out-of-push).
+
 ### After publishing
 
 Once the pages are published, `push --apply` pulls **those pages only**, so
@@ -363,6 +366,33 @@ file becomes an attachment link — a file preview macro comes back as a plain
 link, like every other macro the markdown does not carry.
 
 The mirror's `README.md` is not a Confluence page: `push` ignores it.
+
+### Keeping a page out of `push`
+
+Some pages are mirrored for reading but must never be published from here — a
+page whose macros matter, one owned by another team. List them in the source's
+`pushExclude`:
+
+```js
+{
+    rootId: '1845363038',
+    outDir: 'docs/specs',
+    pushExclude: [
+        '1845400123',                  // a page id: survives a rename
+        'docs/specs/home.md',          // a file
+        'docs/specs/architecture/',    // a directory: everything below it
+    ],
+}
+```
+
+An entry made of digits is a page id — the `confluence_id` in the file's
+frontmatter, or the number in the page's URL. Anything else is a path,
+relative to the config file like `outDir`, and must lie inside that `outDir`.
+
+`push` reports an excluded page as `·  … — excluded by pushExclude` and never
+even fetches it; `--force` does not override this. `pull` is unaffected: the
+page is still mirrored. The list lives in the config rather than in the
+frontmatter because `pull` rewrites the mirror wholesale.
 
 ## Troubleshooting
 

@@ -33,6 +33,10 @@ export default {
 
             // Sidebar heading in the preview server. Optional.
             // label: 'Specifications',
+
+            // Pages \`push\` must never publish: page ids, or paths (a
+            // directory excludes everything below it). Optional.
+            // pushExclude: ['123456789', 'docs/specs/drafts/'],
         },
     ],
 

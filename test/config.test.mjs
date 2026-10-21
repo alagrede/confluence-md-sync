@@ -8,6 +8,7 @@ import {
     assertSyncable,
     commonAncestor,
     findConfigFile,
+    isPushExcluded,
     loadConfig,
     ConfigError,
     PLACEHOLDER_ROOT_ID,
@@ -129,4 +130,33 @@ test('mirrors in unrelated trees still resolve to a root containing both', async
     );
     const config = await loadConfig({ cwd: root });
     assert.equal(config.serve.root, config.root);
+});
+
+test('pushExclude matches by page id, by file and by directory', async () => {
+    const root = await project(
+        "export default { sources: [{ rootId: '1', outDir: 'docs/specs', " +
+            "pushExclude: ['123', 456, 'docs/specs/draft.md', 'docs/specs/internal/'] }] };"
+    );
+    const [source] = (await loadConfig({ cwd: root })).sources;
+    const file = name => path.join(root, 'docs/specs', name);
+    assert.equal(isPushExcluded(source, file('renamed.md'), '123'), true);
+    assert.equal(isPushExcluded(source, file('other.md'), '456'), true);
+    assert.equal(isPushExcluded(source, file('draft.md'), '9'), true);
+    assert.equal(isPushExcluded(source, file('internal/deep/page.md'), '9'), true);
+    assert.equal(isPushExcluded(source, file('internal-notes.md'), '9'), false);
+    assert.equal(isPushExcluded(source, file('home.md'), '9'), false);
+});
+
+test('no pushExclude excludes nothing', async () => {
+    const root = await project("export default { sources: [{ rootId: '1', outDir: 'docs/specs' }] };");
+    const [source] = (await loadConfig({ cwd: root })).sources;
+    assert.equal(isPushExcluded(source, path.join(root, 'docs/specs/home.md'), '1'), false);
+});
+
+test('a pushExclude path outside the mirror is refused', async () => {
+    // Most likely written relative to outDir instead of to the config file.
+    const root = await project(
+        "export default { sources: [{ rootId: '1', outDir: 'docs/specs', pushExclude: ['draft.md'] }] };"
+    );
+    await assert.rejects(() => loadConfig({ cwd: root }), /is not inside docs\/specs/);
 });

@@ -12,6 +12,11 @@ export default {
             rootId: '1845363038',
             outDir: 'docs/specs',
             label: 'Specifications',
+
+            // Pages `push` must never publish. Still pulled. A page id
+            // survives a rename; a path is relative to this file, and a
+            // directory excludes everything below it.
+            pushExclude: ['1845400123', 'docs/specs/architecture/'],
         },
         {
             // A second tree. Each one gets its own index and its own sidebar

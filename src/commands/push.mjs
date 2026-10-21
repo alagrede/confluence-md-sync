@@ -8,7 +8,7 @@ import { existsSync, statSync } from 'node:fs';
 import { readdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { parseArgs } from '../args.mjs';
-import { assertSyncable, loadConfig } from '../config.mjs';
+import { assertSyncable, isPushExcluded, loadConfig } from '../config.mjs';
 import { ConfluenceClient, MIME_BY_EXTENSION } from '../confluence/client.mjs';
 import { markdownToStorage } from '../confluence/md-to-storage.mjs';
 import { storageToMarkdown } from '../confluence/storage-to-md.mjs';
@@ -29,6 +29,8 @@ Options:
   --force            publish despite a version gap or an unmodified file
   --print            print the generated storage format
   --no-pull          do not pull the published pages afterwards
+
+Pages listed in a source's \`pushExclude\` are never published, even with --force.
 
 Exit code 2 means at least one page was blocked by a guard.
 `;
@@ -98,7 +100,7 @@ export async function push(argv) {
         return found;
     }
 
-    const summary = { pushed: 0, skipped: 0, blocked: 0, unchanged: 0, attachments: 0 };
+    const summary = { pushed: 0, skipped: 0, blocked: 0, unchanged: 0, excluded: 0, attachments: 0 };
     /** Page id → { mdPath, version } for every page actually published. */
     const published = new Map();
 
@@ -116,6 +118,13 @@ export async function push(argv) {
         for (const candidate of candidates) {
             const { mdPath, frontmatter, body } = candidate;
             const pageId = frontmatter.confluence_id;
+            // Checked before anything else, --force included: an excluded page
+            // is never even fetched.
+            if (isPushExcluded(source, mdPath, pageId)) {
+                console.log(`   ·  ${display(mdPath)} — excluded by pushExclude`);
+                summary.excluded++;
+                continue;
+            }
             if (!pageId) {
                 console.log(`   !  ${display(mdPath)} — no confluence_id in the frontmatter, skipped`);
                 summary.skipped++;
@@ -264,7 +273,8 @@ export async function push(argv) {
     console.log(
         `\n${summary.pushed} page(s) ${apply ? 'published' : 'to publish'}, ` +
             `${summary.unchanged} unmodified locally, ` +
-            `${summary.blocked} blocked, ${summary.skipped} skipped.`
+            `${summary.blocked} blocked, ${summary.skipped} skipped` +
+            `${summary.excluded ? `, ${summary.excluded} excluded` : ''}.`
     );
     if (!apply && summary.pushed) {
         console.log('\nRe-run with --apply to publish.');

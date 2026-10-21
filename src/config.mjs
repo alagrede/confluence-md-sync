@@ -115,14 +115,56 @@ function normalizeSources(sources, root, file) {
             outDir,
             // Shown as the section heading in the preview server's sidebar.
             label: source.label ?? path.relative(root, outDir),
+            pushExclude: normalizePushExclude(source.pushExclude, root, outDir, where),
         };
     });
 }
 
 /**
+ * Pages `push` must never publish. An entry made of digits is a page id, which
+ * survives a rename; anything else is a path in the mirror, a directory
+ * excluding everything below it. Kept in the config rather than in the
+ * frontmatter, because `pull` rewrites the mirror wholesale.
+ */
+function normalizePushExclude(entries, root, outDir, where) {
+    const exclude = { ids: new Set(), paths: [] };
+    if (entries === undefined) return exclude;
+    if (!Array.isArray(entries)) throw new ConfigError(`${where}: \`pushExclude\` must be an array.`);
+    for (const entry of entries) {
+        if (typeof entry === 'number' || /^\d+$/.test(entry)) {
+            exclude.ids.add(String(entry));
+            continue;
+        }
+        if (typeof entry !== 'string' || !entry.trim()) {
+            throw new ConfigError(
+                `${where}: \`pushExclude\` entries are page ids or paths, got ${JSON.stringify(entry)}.`
+            );
+        }
+        const target = path.resolve(root, entry);
+        const inMirror = path.relative(outDir, target);
+        if (inMirror.startsWith('..') || path.isAbsolute(inMirror)) {
+            throw new ConfigError(
+                `${where}: \`pushExclude\` path ${entry} is not inside ${path.relative(root, outDir)}. ` +
+                    'Paths are relative to the config file, like `outDir`.'
+            );
+        }
+        exclude.paths.push(target);
+    }
+    return exclude;
+}
+
+/** Whether the mirror file `mdPath`, for page `pageId`, is excluded from `push`. */
+export function isPushExcluded(source, mdPath, pageId) {
+    const { ids, paths } = source.pushExclude;
+    if (pageId && ids.has(String(pageId))) return true;
+    const file = path.resolve(mdPath);
+    return paths.some(excluded => file === excluded || file.startsWith(excluded + path.sep));
+}
+
+/**
  * @returns {Promise<{
  *   root: string, file: string|null,
- *   sources: Array<{rootId: string, outDir: string, label: string}>,
+ *   sources: Array<{rootId: string, outDir: string, label: string, pushExclude: {ids: Set<string>, paths: string[]}}>,
  *   serve: {root: string, port: number, title: string, sections: Array<{label: string, dir: string}>},
  * }>}
  */
