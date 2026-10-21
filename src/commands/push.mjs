@@ -8,7 +8,7 @@ import { existsSync, statSync } from 'node:fs';
 import { readdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { parseArgs } from '../args.mjs';
-import { assertSyncable, isPushExcluded, loadConfig } from '../config.mjs';
+import { assertSyncable, isPushExcluded, isWithin, loadConfig } from '../config.mjs';
 import { ConfluenceClient, MIME_BY_EXTENSION } from '../confluence/client.mjs';
 import { markdownToStorage } from '../confluence/md-to-storage.mjs';
 import { storageToMarkdown } from '../confluence/storage-to-md.mjs';
@@ -30,7 +30,8 @@ Options:
   --print            print the generated storage format
   --no-pull          do not pull the published pages afterwards
 
-Pages listed in a source's \`pushExclude\` are never published, even with --force.
+Pages listed in a source's \`exclude\` or \`pushExclude\` are never published,
+even with --force.
 
 Exit code 2 means at least one page was blocked by a guard.
 `;
@@ -92,7 +93,6 @@ export async function push(argv) {
                     continue;
                 }
                 if (!entry.name.endsWith('.md') || entry.name === 'README.md') continue;
-                if (only && !full.includes(only)) continue;
                 found.push({ mdPath: full, ...parseMarkdownFile(await readFile(full, 'utf8')) });
             }
         };
@@ -100,12 +100,27 @@ export async function push(argv) {
         return found;
     }
 
+    /**
+     * Directories of the pages `exclude` names by id: their descendants are
+     * left out too, as `pull` leaves them out. Read from the whole mirror,
+     * before --only, which may select a child but not its parent.
+     */
+    const excludedTrees = (source, files) =>
+        files
+            .filter(
+                ({ mdPath, frontmatter }) =>
+                    path.basename(mdPath) === 'index.md' && source.exclude.ids.has(String(frontmatter.confluence_id))
+            )
+            .map(({ mdPath }) => path.dirname(mdPath));
+
     const summary = { pushed: 0, skipped: 0, blocked: 0, unchanged: 0, excluded: 0, attachments: 0 };
     /** Page id → { mdPath, version } for every page actually published. */
     const published = new Map();
 
     for (const source of config.sources) {
-        const candidates = await collectCandidates(source.outDir);
+        const files = await collectCandidates(source.outDir);
+        const trees = excludedTrees(source, files);
+        const candidates = files.filter(({ mdPath }) => !only || mdPath.includes(only));
         console.log(
             `\n${candidates.length} page(s) in ${display(source.outDir)}` +
                 `${apply ? '' : '   [dry run — nothing will be written]'}\n`
@@ -120,8 +135,8 @@ export async function push(argv) {
             const pageId = frontmatter.confluence_id;
             // Checked before anything else, --force included: an excluded page
             // is never even fetched.
-            if (isPushExcluded(source, mdPath, pageId)) {
-                console.log(`   ·  ${display(mdPath)} — excluded by pushExclude`);
+            if (isPushExcluded(source, mdPath, pageId) || trees.some(tree => isWithin(mdPath, tree))) {
+                console.log(`   ·  ${display(mdPath)} — excluded in the config`);
                 summary.excluded++;
                 continue;
             }

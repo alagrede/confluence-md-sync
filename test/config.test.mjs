@@ -8,6 +8,7 @@ import {
     assertSyncable,
     commonAncestor,
     findConfigFile,
+    isExcluded,
     isPushExcluded,
     loadConfig,
     ConfigError,
@@ -159,4 +160,21 @@ test('a pushExclude path outside the mirror is refused', async () => {
         "export default { sources: [{ rootId: '1', outDir: 'docs/specs', pushExclude: ['draft.md'] }] };"
     );
     await assert.rejects(() => loadConfig({ cwd: root }), /is not inside docs\/specs/);
+});
+
+test('exclude also keeps a page out of push, pushExclude only out of push', async () => {
+    const root = await project(
+        "export default { sources: [{ rootId: '1', outDir: 'docs', exclude: ['10'], pushExclude: ['20'] }] };"
+    );
+    const [source] = (await loadConfig({ cwd: root })).sources;
+    const file = path.join(root, 'docs/page.md');
+    assert.equal(isExcluded(source, file, '10'), true);
+    assert.equal(isPushExcluded(source, file, '10'), true);
+    assert.equal(isExcluded(source, file, '20'), false);
+    assert.equal(isPushExcluded(source, file, '20'), true);
+});
+
+test('an invalid exclude entry names the option it came from', async () => {
+    const root = await project("export default { sources: [{ rootId: '1', outDir: 'docs', exclude: [''] }] };");
+    await assert.rejects(() => loadConfig({ cwd: root }), /sources\[0\]\.exclude entries/);
 });

@@ -178,7 +178,9 @@ survives a `pull`.** A correction is only safe once published. So the cycle is
 
 Content that must *not* go to Confluence — working notes, a gap analysis —
 does not belong in `outDir`. Put it elsewhere in the repository (and show it in
-the preview server with `serve.sections`), or in a ticket.
+the preview server with `serve.sections`), or in a ticket. A page that `pull`
+must leave alone goes in the source's `exclude` — see
+[Leaving pages out](#leaving-pages-out).
 
 ## Read the docs in your browser
 
@@ -321,8 +323,8 @@ yarn docs:push --only the-page --apply
 | `--print` | print the generated storage format |
 | `--no-pull` | do not pull the published pages afterwards |
 
-Pages listed in `pushExclude` are never published — see
-[Keeping a page out of `push`](#keeping-a-page-out-of-push).
+Pages listed in `exclude` or `pushExclude` are never published — see
+[Leaving pages out](#leaving-pages-out).
 
 ### After publishing
 
@@ -367,16 +369,20 @@ link, like every other macro the markdown does not carry.
 
 The mirror's `README.md` is not a Confluence page: `push` ignores it.
 
-### Keeping a page out of `push`
+### Leaving pages out
 
-Some pages are mirrored for reading but must never be published from here — a
-page whose macros matter, one owned by another team. List them in the source's
-`pushExclude`:
+Two lists per source, with the same syntax:
+
+| Option | `pull` | `push` | For |
+| --- | --- | --- | --- |
+| `pushExclude` | mirrors it | never publishes it | a page to read here but not to publish from here — its macros matter, another team owns it |
+| `exclude` | skips it, and every page below it | never publishes it | a page that is none of the mirror's business, or one whose local file must survive a `pull` |
 
 ```js
 {
     rootId: '1845363038',
     outDir: 'docs/specs',
+    exclude: ['1845400777'],
     pushExclude: [
         '1845400123',                  // a page id: survives a rename
         'docs/specs/home.md',          // a file
@@ -388,11 +394,18 @@ page whose macros matter, one owned by another team. List them in the source's
 An entry made of digits is a page id — the `confluence_id` in the file's
 frontmatter, or the number in the page's URL. Anything else is a path,
 relative to the config file like `outDir`, and must lie inside that `outDir`.
+Prefer ids: a path changes when the page is renamed or gains its first child.
 
-`push` reports an excluded page as `·  … — excluded by pushExclude` and never
-even fetches it; `--force` does not override this. `pull` is unaffected: the
-page is still mirrored. The list lives in the config rather than in the
-frontmatter because `pull` rewrites the mirror wholesale.
+`push` reports an excluded page as `·  … — excluded in the config` and never
+even fetches it; `--force` does not override this. The lists live in the
+config rather than in the frontmatter because `pull` rewrites the mirror
+wholesale.
+
+With `exclude`, `pull` does not fetch the page nor walk below it: nothing is
+written, the index leaves it out, and a local file already there is neither
+touched nor reported as orphaned. That file then no longer follows
+Confluence — which is the point when it holds local work, and worth knowing
+otherwise.
 
 ## Troubleshooting
 

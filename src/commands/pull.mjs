@@ -6,7 +6,7 @@ import { existsSync } from 'node:fs';
 import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { parseArgs } from '../args.mjs';
-import { assertSyncable, loadConfig } from '../config.mjs';
+import { assertSyncable, isExcluded, isWithin, loadConfig } from '../config.mjs';
 import { ConfluenceClient } from '../confluence/client.mjs';
 import { storageToMarkdown, isolateImages } from '../confluence/storage-to-md.mjs';
 import { renderMarkdownFile, quoteYaml } from '../markdown/markdown-file.mjs';
@@ -15,7 +15,8 @@ import { slug, safeFilename, encodePath } from '../markdown/slug.mjs';
 export const usage = `Usage: confluence-md-sync pull [options]
 
 Replaces the mirror with the current state of Confluence. Read-only on
-Confluence — it only ever issues GET requests.
+Confluence — it only ever issues GET requests. Pages listed in a source's
+\`exclude\` are left out, with everything below them.
 
 Options:
   --only <pattern>   only rewrite files whose path contains <pattern>
@@ -50,9 +51,11 @@ export async function runPull({ dryRun = false, forceAssets = false, quiet = fal
     assertSyncable(config);
     const client = new ConfluenceClient({ cwd: config.root });
 
-    const stats = { created: 0, updated: 0, unchanged: 0, skipped: 0, assets: 0, missing: [] };
+    const stats = { created: 0, updated: 0, unchanged: 0, skipped: 0, excluded: 0, assets: 0, missing: [] };
     const selected = (mdPath, page) => (!only || mdPath.includes(only)) && (!pageIds || pageIds.has(String(page.id)));
     const seenFiles = new Set();
+    /** Files and directories of the pages `exclude` left out, which are not orphans. */
+    const excludedPaths = [];
 
     const attachmentsByPage = new Map();
     async function attachmentsOf(pageId) {
@@ -170,14 +173,23 @@ export async function runPull({ dryRun = false, forceAssets = false, quiet = fal
 
     const index = [];
 
-    async function walk(parentId, dir, depth, outDir) {
+    async function walk(parentId, dir, depth, source) {
         for (const child of await client.getChildren(parentId)) {
-            const page = await client.getPage(child.id);
             const grandChildren = await client.getChildren(child.id);
-            const name = slug(page.title);
+            const name = slug(child.title);
             const hasChildren = grandChildren.length > 0;
             const mdPath = hasChildren ? path.join(dir, name, 'index.md') : path.join(dir, `${name}.md`);
             const assetsDir = hasChildren ? path.join(dir, name, 'assets') : path.join(dir, 'assets', name);
+
+            // Neither the page nor anything below it is fetched, written or indexed.
+            if (isExcluded(source, mdPath, child.id)) {
+                excludedPaths.push(hasChildren ? path.join(dir, name) : mdPath);
+                stats.excluded++;
+                if (!quiet) console.log(`   ·  ${display(config, mdPath)}   (excluded)`);
+                continue;
+            }
+
+            const page = await client.getPage(child.id);
 
             // The conversion is local and costs no network call, so we always run
             // it: it yields the image count used by the index. Only writing the
@@ -201,14 +213,14 @@ export async function runPull({ dryRun = false, forceAssets = false, quiet = fal
                 index.push({
                     depth,
                     title: page.title,
-                    relative: encodePath(path.relative(outDir, mdPath)),
+                    relative: encodePath(path.relative(source.outDir, mdPath)),
                     url: `${client.baseUrl}${page._links?.webui ?? ''}`,
                     images: imageRefs.length,
                     files: fileRefs.length,
                 });
             }
 
-            if (hasChildren) await walk(child.id, path.join(dir, name), depth + 1, outDir);
+            if (hasChildren) await walk(child.id, path.join(dir, name), depth + 1, source);
         }
     }
 
@@ -239,13 +251,14 @@ export async function runPull({ dryRun = false, forceAssets = false, quiet = fal
                 `${display(config, source.outDir)}${dryRun ? '   [dry run]' : ''}\n`
         );
         index.length = 0;
-        await walk(source.rootId, source.outDir, 0, source.outDir);
+        await walk(source.rootId, source.outDir, 0, source);
         await writeIndex(root, source.outDir);
     }
 
     console.log(
         `\n${stats.created} created, ${stats.updated} updated, ${stats.unchanged} unchanged` +
             (only || pageIds ? `, ${stats.skipped} outside the ${only ? 'pattern' : 'selection'}` : '') +
+            (stats.excluded ? `, ${stats.excluded} excluded` : '') +
             `, ${stats.assets} attachment(s) downloaded.`
     );
     if (only) console.log(`--only pattern: "${only}". The index README.md was regenerated for the whole mirror.`);
@@ -263,7 +276,12 @@ export async function runPull({ dryRun = false, forceAssets = false, quiet = fal
                 const full = path.join(dir, entry.name);
                 if (entry.isDirectory()) {
                     if (entry.name !== 'assets') await scan(full);
-                } else if (entry.name.endsWith('.md') && !seenFiles.has(full)) {
+                } else if (
+                    entry.name.endsWith('.md') &&
+                    !seenFiles.has(full) &&
+                    !isExcluded(source, full) &&
+                    !excludedPaths.some(excluded => isWithin(full, excluded))
+                ) {
                     orphans.push(display(config, full));
                 }
             }

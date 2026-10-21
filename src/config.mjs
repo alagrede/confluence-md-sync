@@ -115,56 +115,71 @@ function normalizeSources(sources, root, file) {
             outDir,
             // Shown as the section heading in the preview server's sidebar.
             label: source.label ?? path.relative(root, outDir),
-            pushExclude: normalizePushExclude(source.pushExclude, root, outDir, where),
+            exclude: normalizeExclusions(source.exclude, root, outDir, `${where}.exclude`),
+            pushExclude: normalizeExclusions(source.pushExclude, root, outDir, `${where}.pushExclude`),
         };
     });
 }
 
 /**
- * Pages `push` must never publish. An entry made of digits is a page id, which
+ * Pages left out of the sync. An entry made of digits is a page id, which
  * survives a rename; anything else is a path in the mirror, a directory
  * excluding everything below it. Kept in the config rather than in the
  * frontmatter, because `pull` rewrites the mirror wholesale.
+ *
+ * `exclude` leaves the page out of both `pull` and `push`, its descendants
+ * included; `pushExclude` only stops `push` from publishing it.
  */
-function normalizePushExclude(entries, root, outDir, where) {
-    const exclude = { ids: new Set(), paths: [] };
-    if (entries === undefined) return exclude;
-    if (!Array.isArray(entries)) throw new ConfigError(`${where}: \`pushExclude\` must be an array.`);
+function normalizeExclusions(entries, root, outDir, where) {
+    const exclusions = { ids: new Set(), paths: [] };
+    if (entries === undefined) return exclusions;
+    if (!Array.isArray(entries)) throw new ConfigError(`${where} must be an array.`);
     for (const entry of entries) {
         if (typeof entry === 'number' || /^\d+$/.test(entry)) {
-            exclude.ids.add(String(entry));
+            exclusions.ids.add(String(entry));
             continue;
         }
         if (typeof entry !== 'string' || !entry.trim()) {
-            throw new ConfigError(
-                `${where}: \`pushExclude\` entries are page ids or paths, got ${JSON.stringify(entry)}.`
-            );
+            throw new ConfigError(`${where} entries are page ids or paths, got ${JSON.stringify(entry)}.`);
         }
         const target = path.resolve(root, entry);
-        const inMirror = path.relative(outDir, target);
-        if (inMirror.startsWith('..') || path.isAbsolute(inMirror)) {
+        if (!isWithin(target, outDir)) {
             throw new ConfigError(
-                `${where}: \`pushExclude\` path ${entry} is not inside ${path.relative(root, outDir)}. ` +
+                `${where} path ${entry} is not inside ${path.relative(root, outDir)}. ` +
                     'Paths are relative to the config file, like `outDir`.'
             );
         }
-        exclude.paths.push(target);
+        exclusions.paths.push(target);
     }
-    return exclude;
+    return exclusions;
 }
 
-/** Whether the mirror file `mdPath`, for page `pageId`, is excluded from `push`. */
-export function isPushExcluded(source, mdPath, pageId) {
-    const { ids, paths } = source.pushExclude;
+/** Whether `file` is `target` or lies below it. */
+export function isWithin(file, target) {
+    const relative = path.relative(target, path.resolve(file));
+    return !relative.startsWith('..') && !path.isAbsolute(relative);
+}
+
+function matches({ ids, paths }, mdPath, pageId) {
     if (pageId && ids.has(String(pageId))) return true;
-    const file = path.resolve(mdPath);
-    return paths.some(excluded => file === excluded || file.startsWith(excluded + path.sep));
+    return paths.some(excluded => isWithin(mdPath, excluded));
+}
+
+/** Whether the page is left out of the sync entirely, by `exclude`. */
+export function isExcluded(source, mdPath, pageId) {
+    return matches(source.exclude, mdPath, pageId);
+}
+
+/** Whether `push` must not publish the page, by `exclude` or `pushExclude`. */
+export function isPushExcluded(source, mdPath, pageId) {
+    return isExcluded(source, mdPath, pageId) || matches(source.pushExclude, mdPath, pageId);
 }
 
 /**
  * @returns {Promise<{
  *   root: string, file: string|null,
- *   sources: Array<{rootId: string, outDir: string, label: string, pushExclude: {ids: Set<string>, paths: string[]}}>,
+ *   sources: Array<{rootId: string, outDir: string, label: string,
+ *     exclude: {ids: Set<string>, paths: string[]}, pushExclude: {ids: Set<string>, paths: string[]}}>,
  *   serve: {root: string, port: number, title: string, sections: Array<{label: string, dir: string}>},
  * }>}
  */

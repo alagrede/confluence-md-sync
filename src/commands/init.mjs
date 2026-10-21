@@ -34,8 +34,13 @@ export default {
             // Sidebar heading in the preview server. Optional.
             // label: 'Specifications',
 
-            // Pages \`push\` must never publish: page ids, or paths (a
-            // directory excludes everything below it). Optional.
+            // Pages left out of both \`pull\` and \`push\`, with everything
+            // below them: page ids, or paths (a directory excludes everything
+            // below it). Optional.
+            // exclude: ['123456789'],
+
+            // Pages \`push\` must never publish, but \`pull\` still mirrors.
+            // Same syntax. Optional.
             // pushExclude: ['123456789', 'docs/specs/drafts/'],
         },
     ],

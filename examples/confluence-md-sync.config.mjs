@@ -13,9 +13,13 @@ export default {
             outDir: 'docs/specs',
             label: 'Specifications',
 
-            // Pages `push` must never publish. Still pulled. A page id
-            // survives a rename; a path is relative to this file, and a
-            // directory excludes everything below it.
+            // Pages left out of both pull and push, with everything below
+            // them. A page id survives a rename; a path is relative to this
+            // file, and a directory excludes everything below it.
+            exclude: ['1845400777'],
+
+            // Pages push must never publish, but that pull still mirrors.
+            // Same syntax as `exclude`.
             pushExclude: ['1845400123', 'docs/specs/architecture/'],
         },
         {
